@@ -185,6 +185,25 @@ docker run --rm -v agents-anywhere_agents-anywhere-files-next:/data -v "$PWD/bac
 
 > 注意：服务端 **不要单独升到比客户端更高的版本**。跨 MINOR（例如 2.0.x → 2.1.x）时，桌面端和手机端必须一起升级。
 
+### 同步上游版本（本仓库是 fork）
+
+本仓库 `origin` 指向 `IceyWuu/agent-dock`，`upstream` 指向上游 `anywhere-labs/Agents-Anywhere`。上游发布新 tag 后：
+
+```bash
+cd /opt/agents-anywhere
+git fetch upstream --tags        # 取上游新 tag
+git push origin --tags           # 同步到自己的仓库，服务器才能按 tag 拉取
+bash deploy/upgrade.sh v2.x.y    # 切版本并重建
+```
+
+合并上游代码改动（不只是 tag）：
+
+```bash
+git fetch upstream
+git merge upstream/main          # 解决冲突后提交
+```
+
+
 ---
 
 ## 8. 安全（重要，别跳过）
