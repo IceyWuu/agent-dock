@@ -1,3 +1,13 @@
+# agent-dock
+
+> 基于 [Agents Anywhere](https://github.com/anywhere-labs/Agents-Anywhere) **v2.0.3** 的自托管分支，面向单机 Docker 部署。
+> 部署与运维见 [deploy/README.md](deploy/README.md)。
+>
+> 上游代码与品牌素材版权归 anywhere-labs 及原作者所有，按 MIT 许可使用；本仓库与上游项目无隶属关系。
+> `agent_server`、`/api/v2` 等内部标识符保持上游命名，便于后续合并上游更新。
+
+---
+
 <p align="center">
   <a href="https://www.agents-anywhere.com"><img src="docs/images/readme-hero-zh.webp" alt="Agents Anywhere：跨设备的开源 Agent 工作台。支持 Codex、Claude Code 和 DeepSeek Harness，更多 Agent 即将支持。" width="100%"></a>
 </p>

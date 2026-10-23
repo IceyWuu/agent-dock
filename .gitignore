@@ -46,3 +46,8 @@ docs/reference/*
 _reference/*
 !_reference/httpx-s3-client/
 !_reference/httpx-s3-client/**
+
+# Self-hosted deployment: secrets and backups stay on the server
+deploy/.env
+deploy/backups/
+deploy/Caddyfile
