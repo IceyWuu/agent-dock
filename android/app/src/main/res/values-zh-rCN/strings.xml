@@ -723,4 +723,14 @@
     <string name="session_response_device_offline">设备已离线，电脑重新连接后才能提交回答。</string>
     <string name="session_question_unsupported">暂不支持此提问格式，请在电脑端回答。</string>
     <string name="home_ungrouped">未分组</string>
+    <string name="update_install_title">安装提示</string>
+    <string name="update_install_signature">更新包与当前 App 的签名不同，Android 无法覆盖安装。请使用同一来源的更新包；请勿在备份数据前卸载。</string>
+    <string name="update_install_version">安装包版本不高于当前版本，请检查最新版本。</string>
+    <string name="update_install_conflict">Android 报告与已安装的应用冲突，可能涉及签名，或其他用户、工作空间中的副本。请使用同一来源的更新包并检查其他空间；请勿未备份就卸载。</string>
+    <string name="update_install_storage">手机存储空间不足，请清理一些空间后重试。</string>
+    <string name="update_install_blocked">安装被系统阻止。请在系统设置中允许此 App 安装应用，并检查设备或工作空间的限制后重试。</string>
+    <string name="update_install_incompatible">Android 提示此更新与设备或系统版本不兼容，请反馈手机型号和 Android 版本。</string>
+    <string name="update_install_cancelled">安装已取消，当前 App 和数据已保留，可在设置中重新更新。</string>
+    <string name="update_install_invalid">Android 无法读取此更新包，请重新下载最新版本。</string>
+    <string name="update_install_failed">Android 未能完成安装。请检查存储空间和安装权限后，在设置中重试；若仍失败，请反馈系统提示和手机型号。</string>
 </resources>

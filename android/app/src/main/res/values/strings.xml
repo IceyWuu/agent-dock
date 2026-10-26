@@ -725,4 +725,14 @@
     <string name="session_response_device_offline">Device offline. Reconnect your computer to submit an answer.</string>
     <string name="session_question_unsupported">This question format is not supported yet. Answer it on your computer.</string>
     <string name="home_ungrouped">Ungrouped</string>
+    <string name="update_install_title">Installation notice</string>
+    <string name="update_install_signature">This update was signed differently from the installed app. Android cannot install it over your current app. Use an update from the same source; do not uninstall until your data is backed up.</string>
+    <string name="update_install_version">This update is not newer than your installed app. Check for the latest version.</string>
+    <string name="update_install_conflict">Android reported a conflict with an installed app. This can involve its signature or a copy in another user or work profile. Use an update from the same source and check other profiles; do not uninstall without backing up your data.</string>
+    <string name="update_install_storage">There is not enough storage to install this update. Free some space, then try again.</string>
+    <string name="update_install_blocked">Installation was blocked. Allow updates from this app in system settings, and check any device or work profile restrictions, then try again.</string>
+    <string name="update_install_incompatible">Android says this update is not compatible with this device or Android version. Please report your phone model and Android version.</string>
+    <string name="update_install_cancelled">Installation was cancelled. Your current app and data are unchanged. You can retry the update in Settings.</string>
+    <string name="update_install_invalid">Android could not read the update package. Download the latest update again.</string>
+    <string name="update_install_failed">Android could not complete installation. Check available storage and installation permissions, then retry from Settings. If it still fails, report the system message and phone model.</string>
 </resources>

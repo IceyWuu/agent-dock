@@ -74,6 +74,7 @@ import com.agentsanywhere.app.ui.screens.home.HomeTab
 import com.agentsanywhere.app.ui.screens.announcements.AnnouncementGate
 import com.agentsanywhere.app.ui.screens.announcements.AnnouncementPage
 import com.agentsanywhere.app.ui.screens.update.AppUpdatePromptDialog
+import com.agentsanywhere.app.ui.screens.update.AppUpdateFailureDialog
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
@@ -932,6 +933,7 @@ fun AgentsAnywhereApp(
             onIgnore = appUpdateViewModel::ignoreVersion,
         )
     }
+    AppUpdateFailureDialog(appUpdateViewModel.state.installFailure, appUpdateViewModel::dismissInstallFailure)
     LaunchedEffect(updatesAllowed, appUpdateViewModel.state.installFile) {
         if (updatesAllowed) appUpdateViewModel.state.installFile?.let(onInstallUpdate)
     }

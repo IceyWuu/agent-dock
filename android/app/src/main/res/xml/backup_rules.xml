@@ -3,4 +3,5 @@
     <exclude
         domain="sharedpref"
         path="auth.xml" />
+        <exclude domain="sharedpref" path="app-update-install-result.xml" />
 </full-backup-content>

@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import com.agentsanywhere.app.feature.update.UpdateInstallFailure
 import androidx.compose.material3.Text
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
@@ -202,4 +205,30 @@ private fun UpdateDialogButton(
             fontWeight = FontWeight.SemiBold,
         )
     }
+}
+
+@Composable
+fun AppUpdateFailureDialog(failure: UpdateInstallFailure?, onDismiss: () -> Unit) {
+    if (failure == null) return
+    val message = when (failure) {
+        UpdateInstallFailure.Signature -> R.string.update_install_signature
+        UpdateInstallFailure.Version -> R.string.update_install_version
+        UpdateInstallFailure.Conflict -> R.string.update_install_conflict
+        UpdateInstallFailure.Storage -> R.string.update_install_storage
+        UpdateInstallFailure.Blocked -> R.string.update_install_blocked
+        UpdateInstallFailure.Incompatible -> R.string.update_install_incompatible
+        UpdateInstallFailure.Cancelled -> R.string.update_install_cancelled
+        UpdateInstallFailure.Invalid -> R.string.update_install_invalid
+        UpdateInstallFailure.Generic -> R.string.update_install_failed
+    }
+    val colors = LocalAAColors.current
+    AlertDialog(
+        containerColor = colors.dialogSurface,
+        titleContentColor = colors.ink,
+        textContentColor = colors.muted,
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.update_install_title)) },
+        text = { Text(stringResource(message)) },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.ok), color = colors.ink) } },
+    )
 }

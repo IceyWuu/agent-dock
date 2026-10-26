@@ -41,6 +41,7 @@ data class AppUpdateUiState(
     val ignoreFailed: Boolean = false,
     val downloadUnavailable: Boolean = false,
     val installFile: File? = null,
+    val installFailure: UpdateInstallFailure? = null,
 )
 
 class AppUpdateViewModel(application: Application) : AndroidViewModel(application) {
@@ -57,6 +58,9 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
     private val updatePreferences = application.getSharedPreferences("app-updates", Context.MODE_PRIVATE)
     private val ignoredVersionKey: String get() = "ignored:$currentUpdateServer"
 
+    private val storage = AppUpdateStorage(application)
+    private val startupCleanup = viewModelScope.launch(Dispatchers.IO) { storage.clearOrphanedDownloads() }
+
     var state by mutableStateOf(AppUpdateUiState())
         private set
 
@@ -70,7 +74,7 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
         if (state.checking && serverUrl == currentUpdateServer) return
         checkJob?.cancel()
         val generation = ++checkGeneration
-        if (serverUrl != currentUpdateServer) state = AppUpdateUiState()
+        if (serverUrl != currentUpdateServer) state = AppUpdateUiState(installFailure = state.installFailure)
         currentUpdateServer = serverUrl
         state = state.copy(checking = true, checkFailed = false)
         checkJob = viewModelScope.launch {
@@ -133,7 +137,8 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
         cancelDownload()
         downloadJob = null
         activeDownloadCall = null
-        state = AppUpdateUiState()
+        storage.deleteDownload(state.installFile)
+        state = AppUpdateUiState(installFailure = state.installFailure)
     }
 
     fun showUpdatePrompt() {
@@ -191,6 +196,7 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
         )
         downloadJob = viewModelScope.launch {
             try {
+                startupCleanup.join()
                 val file = downloadRelease(release, serverUrl, generation)
                 if (!isCurrentSession(serverUrl, generation)) {
                     file.delete()
@@ -209,7 +215,8 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
                     downloadedBytes = 0,
                     totalBytes = null,
                     preparingInstall = false,
-                    downloadFailed = !cancelled,
+                    downloadFailed = !cancelled && error !is UpdateInstallException,
+                    installFailure = (error as? UpdateInstallException)?.reason,
                 )
             } finally {
                 if (generation == checkGeneration) {
@@ -234,17 +241,25 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
         )
     }
 
-    fun reportInstallFailure() {
+    fun consumeInstallResult() {
+        storage.takeFailure()?.let { reportInstallFailure(it) }
+    }
+
+    fun dismissInstallFailure() { state = state.copy(installFailure = null) }
+
+    fun reportInstallFailure(reason: UpdateInstallFailure = UpdateInstallFailure.Generic) {
+        storage.deleteDownload(state.installFile)
         state = state.copy(
             downloading = false,
             installFile = null,
             preparingInstall = false,
-            downloadFailed = true,
+            downloadFailed = false,
+            installFailure = reason,
         )
     }
 
     private suspend fun downloadRelease(release: AndroidAppRelease, serverUrl: String, generation: Int): File = withContext(Dispatchers.IO) {
-        val updatesDir = File(getApplication<Application>().cacheDir, "app-updates").apply {
+        val updatesDir = storage.directory.apply {
             mkdirs()
         }
         val target = File(updatesDir, "agents-anywhere-${release.versionName}-${UUID.randomUUID()}.apk")
@@ -309,6 +324,7 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
 
     override fun onCleared() {
         cancelDownload()
+        storage.deleteDownload(state.installFile)
         super.onCleared()
     }
 }

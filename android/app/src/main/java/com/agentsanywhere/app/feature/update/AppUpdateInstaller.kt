@@ -13,26 +13,36 @@ object AppUpdateInstaller {
         val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
             setAppPackageName(context.packageName)
+            setSize(apk.length())
+            setInstallReason(android.content.pm.PackageManager.INSTALL_REASON_USER)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_REQUIRED)
             }
         }
         val sessionId = installer.createSession(params)
-        installer.openSession(sessionId).use { session ->
-            apk.inputStream().use { input ->
-                session.openWrite("app-update.apk", 0, apk.length()).use { output ->
-                    input.copyTo(output)
-                    session.fsync(output)
+        try {
+            installer.openSession(sessionId).use { session ->
+                apk.inputStream().use { input ->
+                    session.openWrite("app-update.apk", 0, apk.length()).use { output ->
+                        input.copyTo(output)
+                        session.fsync(output)
+                    }
                 }
+                val callback = Intent(context, AppUpdateInstallReceiver::class.java)
+                val pendingIntent = PendingIntent.getBroadcast(
+                    context,
+                    sessionId,
+                    callback,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+                )
+                session.commit(pendingIntent.intentSender)
             }
-            val callback = Intent(context, AppUpdateInstallReceiver::class.java)
-            val pendingIntent = PendingIntent.getBroadcast(
-                context,
-                sessionId,
-                callback,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
-            )
-            session.commit(pendingIntent.intentSender)
+        } catch (error: Throwable) {
+            runCatching { installer.abandonSession(sessionId) }
+            throw error
+        } finally {
+            // The system's install session owns its copy after commit; never delete external APKs.
+            AppUpdateStorage(context).deleteDownload(apk)
         }
     }
 }
@@ -43,14 +53,24 @@ class AppUpdateInstallReceiver : BroadcastReceiver() {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 @Suppress("DEPRECATION")
                 val confirmation = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
-                confirmation?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                confirmation?.let(context::startActivity)
+                try {
+                    requireNotNull(confirmation).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(confirmation)
+                } catch (_: Exception) {
+                    AppUpdateStorage(context).saveFailure(UpdateInstallFailure.Blocked)
+                    val sessionId = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
+                    if (sessionId >= 0) runCatching { context.packageManager.packageInstaller.abandonSession(sessionId) }
+                }
             }
             PackageInstaller.STATUS_SUCCESS -> {
+                AppUpdateStorage(context).clearFailure()
                 context.packageManager.getLaunchIntentForPackage(context.packageName)
                     ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    ?.let(context::startActivity)
+                    ?.let { runCatching { context.startActivity(it) } }
             }
+            else -> AppUpdateStorage(context).saveFailure(
+                installFailureForStatus(intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)),
+            )
         }
     }
 }

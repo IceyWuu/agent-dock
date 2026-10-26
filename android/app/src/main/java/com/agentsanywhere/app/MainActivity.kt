@@ -21,6 +21,7 @@ import com.agentsanywhere.app.app.AgentsAnywhereApp
 import com.agentsanywhere.app.feature.auth.WebLoginViewModel
 import com.agentsanywhere.app.feature.update.AppUpdateInstaller
 import com.agentsanywhere.app.feature.update.AppUpdateViewModel
+import com.agentsanywhere.app.feature.update.UpdateInstallFailure
 import com.agentsanywhere.app.ui.designsystem.AAAppearanceMode
 import com.agentsanywhere.app.ui.designsystem.AALanguageMode
 import com.agentsanywhere.app.ui.designsystem.AgentsAnywhereTheme
@@ -41,6 +42,9 @@ class MainActivity : ComponentActivity() {
     private var sidebarViewMode by mutableStateOf(HomeSidebarViewMode.Project)
     private var pendingUpdateApk: File? = null
     private var installingUpdate = false
+    private val installResultListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == "failure") appUpdateViewModel.consumeInstallResult()
+    }
 
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(newBase.withSavedLanguage())
@@ -48,6 +52,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        getSharedPreferences("app-update-install-result", MODE_PRIVATE)
+            .registerOnSharedPreferenceChangeListener(installResultListener)
         SingletonImageLoader.setSafe { context ->
             ImageLoader.Builder(context)
                 .memoryCache {
@@ -111,12 +117,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        appUpdateViewModel.consumeInstallResult()
         val pending = pendingUpdateApk ?: return
         if (packageManager.canRequestPackageInstalls()) {
             requestUpdateInstall(pending)
         } else {
             pendingUpdateApk = null
-            appUpdateViewModel.reportInstallFailure()
+            appUpdateViewModel.reportInstallFailure(UpdateInstallFailure.Blocked)
         }
     }
 
@@ -128,12 +135,17 @@ class MainActivity : ComponentActivity() {
         }
         if (!packageManager.canRequestPackageInstalls()) {
             pendingUpdateApk = apk
-            startActivity(
-                Intent(
-                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                    Uri.parse("package:$packageName"),
-                ),
-            )
+            try {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:$packageName"),
+                    ),
+                )
+            } catch (_: Exception) {
+                pendingUpdateApk = null
+                appUpdateViewModel.reportInstallFailure(UpdateInstallFailure.Blocked)
+            }
             return
         }
         pendingUpdateApk = null
@@ -148,6 +160,12 @@ class MainActivity : ComponentActivity() {
             }
             installingUpdate = false
         }
+    }
+
+    override fun onDestroy() {
+        getSharedPreferences("app-update-install-result", MODE_PRIVATE)
+            .unregisterOnSharedPreferenceChangeListener(installResultListener)
+        super.onDestroy()
     }
 
     private fun Context.withSavedLanguage(): Context {

@@ -31,10 +31,14 @@ internal fun verifyUpdatePackage(context: Context, apk: File, release: AndroidAp
     val archive = requireNotNull(manager.getPackageArchiveInfo(apk.path, flags)) { "The download is not an Android package." }
     val installed = manager.getPackageInfo(context.packageName, flags)
     val archiveCode = if (Build.VERSION.SDK_INT >= 28) archive.longVersionCode else archive.versionCode.toLong()
-    require(archive.packageName == context.packageName && archive.versionName == release.versionName &&
-        archiveCode == release.versionCode && archiveCode > BuildConfig.VERSION_CODE) { "Update package or version does not match." }
+    if (archive.packageName != context.packageName || archive.versionName != release.versionName || archiveCode != release.versionCode) {
+        throw UpdateInstallException(UpdateInstallFailure.Invalid)
+    }
     val archiveSigners = if (Build.VERSION.SDK_INT >= 28) archive.signingInfo?.apkContentsSigners else archive.signatures
     val installedSigners = if (Build.VERSION.SDK_INT >= 28) installed.signingInfo?.apkContentsSigners else installed.signatures
-    require(!archiveSigners.isNullOrEmpty() && !installedSigners.isNullOrEmpty() &&
-        archiveSigners.toSet() == installedSigners.toSet()) { "Update signature does not match the installed application." }
+    if (archiveSigners.isNullOrEmpty() || installedSigners.isNullOrEmpty() ||
+        archiveSigners.toSet() != installedSigners.toSet()) {
+        throw UpdateInstallException(UpdateInstallFailure.Signature)
+    }
+    if (archiveCode <= BuildConfig.VERSION_CODE) throw UpdateInstallException(UpdateInstallFailure.Version)
 }
