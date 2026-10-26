@@ -41,6 +41,8 @@ internal fun WorkspaceBrowser(
     var loading by remember(connectorId, root) { mutableStateOf(false) }
     var revision by remember { mutableIntStateOf(0) }
     var resolvedRoot by remember(connectorId, root) { mutableStateOf(root) }
+    var progress by remember(connectorId, root, selected) { mutableStateOf<DocumentLoadProgress?>(null) }
+    var forceRefresh by remember { mutableStateOf(false) }
     val failure = stringResource(R.string.document_load_failed)
 
     LaunchedEffect(openFilePath, connectorId, root) {
@@ -58,8 +60,14 @@ internal fun WorkspaceBrowser(
     LaunchedEffect(connectorId, root, selected, revision) {
         val target = selected ?: return@LaunchedEffect
         document = null; error = null
+        progress = null
+        val refresh = forceRefresh
+        forceRefresh = false
+        val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
         val request = remoteFileRequest(target, deviceOs, root)
-        controller.readDocument(connectorId, request.root, request.path)
+        controller.readDocument(connectorId, request.root, request.path, forceRefresh = refresh, onProgress = {
+            if (job?.isActive != false) progress = it
+        })
             .onSuccess { document = it }
             .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; error = failure }
     }
@@ -70,11 +78,26 @@ internal fun WorkspaceBrowser(
                 TextButton({ selected = null; error = null }, Modifier.weight(1f)) {
                     Text("‹ " + selected!!.replace('\\', '/').substringAfterLast('/'), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                TextButton({ revision++ }) { Text(stringResource(R.string.document_reload)) }
+                TextButton({ forceRefresh = true; revision++ }) { Text(stringResource(R.string.document_reload)) }
             }
             when {
                 error != null -> ReaderStatus(error!!)
-                document == null -> ReaderStatus(stringResource(R.string.files_loading_file))
+                document == null -> {
+                    val current = progress
+                    val downloading = current?.stage == DocumentLoadStage.Downloading
+                    val fraction = if (downloading && current!!.total > 0) current.received.toFloat() / current.total else null
+                    val label = if (downloading) stringResource(R.string.document_download_progress,
+                        (current!!.received / 1048576.0).toFloat(), (current.total / 1048576.0).toFloat())
+                        else stringResource(R.string.document_checking)
+                    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        Column(Modifier.padding(24.dp), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                            Text(label, color = colors.muted)
+                            Spacer(Modifier.height(12.dp))
+                            if (fraction != null) LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+                            else LinearProgressIndicator(Modifier.fillMaxWidth())
+                        }
+                    }
+                }
                 else -> DocumentReader(document!!, Modifier.weight(1f), onOpenFile = { link ->
                     selected = resolveWorkspaceLink(selected!!, link)
                 }, loadImage = { link ->

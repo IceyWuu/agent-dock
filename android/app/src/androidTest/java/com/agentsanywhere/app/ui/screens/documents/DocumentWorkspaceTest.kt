@@ -88,6 +88,68 @@ class DocumentWorkspaceTest {
         assertEquals(1, DocumentReadingStore(context).position(document.identity, "pdf"))
     }
 
+    @Test fun fortyPagePdfReopensWithoutDownloadAndRefreshChecksForChanges() = fixture { controller ->
+        val url = InstrumentationRegistry.getArguments().getString("documentFixture")!!
+        fun stats(): org.json.JSONObject = org.json.JSONObject(java.net.URL("$url/fixture-stats").readText())
+        fun downloads(): Int = stats().getJSONObject("downloads").optInt("forty.pdf")
+        fun changePages(pages: Int) {
+            val connection = java.net.URL("$url/fixture-control").openConnection() as java.net.HttpURLConnection
+            try {
+                connection.requestMethod = "POST"; connection.doOutput = true
+                connection.outputStream.use { it.write("{\"pages\":$pages}".toByteArray()) }
+                check(connection.responseCode == 200)
+            } finally { connection.disconnect() }
+        }
+        changePages(40)
+        val identity = documentIdentity(url, "document-test", "fixture", "/fixture/forty.pdf")
+        File(context.cacheDir, "workspace-documents").listFiles()?.filter { it.name.startsWith(identity) }?.forEach { it.delete() }
+        val before = downloads()
+        val progress = java.util.Collections.synchronizedList(mutableListOf<DocumentLoadProgress>())
+        val started = android.os.SystemClock.elapsedRealtime()
+        val first = runBlocking { controller.readDocument("fixture", "/fixture", "/fixture/forty.pdf", onProgress = { progress.add(it) }).getOrThrow() }
+        val coldMs = android.os.SystemClock.elapsedRealtime() - started
+        assertEquals(before + 1, downloads())
+        val preparedAfterFirst = stats().getJSONObject("prepares").optInt("forty.pdf")
+        assertTrue(progress.any { it.stage == DocumentLoadStage.Downloading && it.received == it.total && it.total > 8 * 1024 * 1024 })
+        val cachedAt = android.os.SystemClock.elapsedRealtime()
+        // A fresh controller models closing and reopening the screen or process.
+        val newController = FilesController(FilesApi(), AuthSessionStore(context), context.cacheDir)
+        val cached = runBlocking { newController.readDocument("fixture", "/fixture", "/fixture/forty.pdf").getOrThrow() }
+        val cachedMs = android.os.SystemClock.elapsedRealtime() - cachedAt
+        assertEquals(first.file, cached.file)
+        assertEquals(before + 1, downloads())
+        assertEquals("Fresh PDF opens must not make even a metadata request", preparedAfterFirst, stats().getJSONObject("prepares").optInt("forty.pdf"))
+        assertTrue("A cache hit must avoid the throttled 8 MB transfer", cachedMs < coldMs / 4)
+        val validationAt = android.os.SystemClock.elapsedRealtime()
+        runBlocking { newController.readDocument("fixture", "/fixture", "/fixture/forty.pdf", forceRefresh = true).getOrThrow() }
+        val validationMs = android.os.SystemClock.elapsedRealtime() - validationAt
+        assertEquals("Unchanged files must not be transferred again", before + 1, downloads())
+        assertEquals(preparedAfterFirst + 1, stats().getJSONObject("prepares").optInt("forty.pdf"))
+        val source = PdfPageSource(first.file)
+        val renderAt = android.os.SystemClock.elapsedRealtime()
+        val pageOne = source.render(0)
+        val firstPageMs = android.os.SystemClock.elapsedRealtime() - renderAt
+        assertEquals(40, pageOne.count)
+        assertEquals(39, source.render(39).index)
+        assertSame("Back navigation reuses the page bitmap", pageOne.bitmap, source.render(0).bitmap)
+        try {
+            changePages(41)
+            val updated = runBlocking { newController.readDocument("fixture", "/fixture", "/fixture/forty.pdf", forceRefresh = true).getOrThrow() }
+            assertNotEquals(first.file, updated.file)
+            assertEquals(before + 2, downloads())
+            assertEquals("Updating a file cannot change an already open reader", 40, source.render(0).count)
+        } finally { changePages(40); source.dispose() }
+        DocumentReadingStore(context).savePosition(first.identity, "pdf", 39)
+        compose.setContent { AgentsAnywhereTheme(AAAppearanceMode.Light) {
+            DocumentReader(first, Modifier.windowInsetsPadding(WindowInsets.safeDrawing))
+        } }
+        compose.waitUntil(15000) { compose.onAllNodesWithText("40 / 40").fetchSemanticsNodes().isNotEmpty() }
+        capture("forty-page-pdf")
+        val result = "40 pages, 8 MB, fixture throttled at 2 MB/s: coldMs=$coldMs cachedMs=$cachedMs unchangedValidationMs=$validationMs firstPageRenderMs=$firstPageMs"
+        android.util.Log.i("DocumentBenchmark", result)
+        File(context.getExternalFilesDir(null), "documents-qa/pdf-performance.txt").writeText(result)
+    }
+
     @Test fun splitResizeAndFullScreenKeepBothPanelsUsable() {
         compose.setContent { AgentsAnywhereTheme(AAAppearanceMode.Light) {
             var pane by remember { mutableIntStateOf(0) }

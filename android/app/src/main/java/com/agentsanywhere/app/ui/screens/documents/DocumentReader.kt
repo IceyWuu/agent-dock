@@ -1,8 +1,6 @@
 package com.agentsanywhere.app.ui.screens.documents
 
 import android.graphics.Bitmap
-import android.graphics.pdf.PdfRenderer
-import android.os.ParcelFileDescriptor
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.rememberTransformableState
@@ -114,6 +112,8 @@ internal fun DocumentReader(
 // Kept here so PDF rendering never depends on a browser's built-in PDF support.
 @Composable
 private fun PdfDocument(document: WorkspaceDocument, store: DocumentReadingStore, modifier: Modifier) {
+    val source = remember(document.file) { PdfPageSource(document.file) }
+    DisposableEffect(source) { onDispose { source.dispose() } }
     var page by rememberSaveable(document.identity) { mutableIntStateOf(store.position(document.identity, "pdf")) }
     var count by remember(document.file) { mutableIntStateOf(0) }
     var bitmap by remember(document.file) { mutableStateOf<Bitmap?>(null) }
@@ -122,23 +122,10 @@ private fun PdfDocument(document: WorkspaceDocument, store: DocumentReadingStore
         failed = false
         bitmap = null
         try {
-            val rendered = withContext(Dispatchers.IO) {
-                ParcelFileDescriptor.open(document.file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
-                    PdfRenderer(descriptor).use { renderer ->
-                        val index = page.coerceIn(0, (renderer.pageCount - 1).coerceAtLeast(0))
-                        renderer.openPage(index).use { pdfPage ->
-                            val scale = minOf(1600f / pdfPage.width, 2200f / pdfPage.height)
-                            val image = Bitmap.createBitmap((pdfPage.width * scale).toInt().coerceAtLeast(1), (pdfPage.height * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
-                            image.eraseColor(android.graphics.Color.WHITE)
-                            pdfPage.render(image, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                            Triple(renderer.pageCount, index, image)
-                        }
-                    }
-                }
-            }
-            count = rendered.first
-            page = rendered.second
-            bitmap = rendered.third
+            val rendered = withContext(Dispatchers.IO) { source.render(page) }
+            count = rendered.count
+            page = rendered.index
+            bitmap = rendered.bitmap
             store.savePosition(document.identity, "pdf", page)
         } catch (error: Exception) {
             if (error is kotlinx.coroutines.CancellationException) throw error

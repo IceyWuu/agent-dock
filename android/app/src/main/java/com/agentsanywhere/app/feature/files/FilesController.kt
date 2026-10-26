@@ -6,12 +6,15 @@ import com.agentsanywhere.app.feature.auth.AuthSessionStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class FilesController(
     private val filesApi: FilesApi,
     private val sessionStore: AuthSessionStore,
     private val cacheDirectory: java.io.File,
 ) {
+    private val documentLocks = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
     suspend fun listFiles(
         connectorId: String,
         root: String,
@@ -80,23 +83,54 @@ class FilesController(
         }
     }
 
-    suspend fun readDocument(connectorId: String, root: String, path: String): Result<WorkspaceDocument> =
+    suspend fun readDocument(connectorId: String, root: String, path: String, forceRefresh: Boolean = false,
+        onProgress: (DocumentLoadProgress) -> Unit = {}): Result<WorkspaceDocument> =
         withContext(Dispatchers.IO) {
             runCatching {
                 val auth = authSession()
                 val identity = documentIdentity(auth.serverUrl, sessionStore.readUserId(), connectorId, resolveWorkspaceLink("${root.trimEnd('/')}/__document__", path))
+                documentLocks.getOrPut(identity) { Mutex() }.withLock {
+                val started = android.os.SystemClock.elapsedRealtime()
                 val directory = java.io.File(cacheDirectory, "workspace-documents").apply { mkdirs() }
+                val cache = DocumentDiskCache(directory)
+                val cached = cache.read(identity)
+                val name = path.replace('\\', '/').substringAfterLast('/')
+                if (!forceRefresh && workspaceFileKind(name) == WorkspaceFileKind.Pdf && cached?.isFresh(System.currentTimeMillis()) == true) {
+                    cached.file.setLastModified(System.currentTimeMillis())
+                    android.util.Log.i("DocumentTiming", "cache=fresh elapsedMs=${android.os.SystemClock.elapsedRealtime() - started}")
+                    return@withLock WorkspaceDocument(identity, name, cached.file)
+                }
+                onProgress(DocumentLoadProgress(DocumentLoadStage.Checking))
+                val prepared = kotlinx.coroutines.runInterruptible {
+                    filesApi.prepareDownload(auth.serverUrl, auth.accessToken, connectorId, root, path)
+                }
+                android.util.Log.i("DocumentTiming", "phase=prepare elapsedMs=${android.os.SystemClock.elapsedRealtime() - started} bytes=${prepared.size}")
+                val cachedSha = cached?.let { it.sha256 ?: cache.checksum(it.file) }
+                val target = cache.target(identity, prepared.sha256)
+                if (cached != null && cached.file.length() == prepared.size && cachedSha == prepared.sha256) {
+                    if (cached.file != target) check(cached.file.renameTo(target)) { "Could not migrate document cache." }
+                    cache.save(identity, target, prepared.sha256, System.currentTimeMillis())
+                    target.setLastModified(System.currentTimeMillis())
+                    android.util.Log.i("DocumentTiming", "cache=validated elapsedMs=${android.os.SystemClock.elapsedRealtime() - started}")
+                    return@withLock WorkspaceDocument(identity, name, target)
+                }
                 val temporary = java.io.File.createTempFile("document-", ".part", directory)
                 try {
+                    val downloadStarted = android.os.SystemClock.elapsedRealtime()
                     kotlinx.coroutines.runInterruptible {
-                        filesApi.downloadFile(auth.serverUrl, auth.accessToken, connectorId, root, path, temporary)
+                        filesApi.downloadPrepared(auth.accessToken, prepared, temporary) { received, total ->
+                            onProgress(DocumentLoadProgress(DocumentLoadStage.Downloading, received, total))
+                        }
                     }
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                    val target = java.io.File(directory, "$identity.document")
-                    check(temporary.renameTo(target)) { "Could not cache document." }
+                    // Never overwrite a content file that an existing PDF reader has open.
+                    if (!target.isFile || target.length() != prepared.size) check(temporary.renameTo(target)) { "Could not cache document." }
+                    cache.save(identity, target, prepared.sha256, System.currentTimeMillis())
                     WorkspaceDocumentCache.prune(directory, target)
-                    WorkspaceDocument(identity, path.replace('\\', '/').substringAfterLast('/'), target)
+                    android.util.Log.i("DocumentTiming", "phase=download elapsedMs=${android.os.SystemClock.elapsedRealtime() - downloadStarted} bytes=${prepared.size}")
+                    WorkspaceDocument(identity, name, target)
                 } finally { temporary.delete() }
+                }
             }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
         }
 

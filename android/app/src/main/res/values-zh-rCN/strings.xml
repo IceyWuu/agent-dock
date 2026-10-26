@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="document_checking">正在检查设备上的文件…</string>
+    <string name="document_download_progress">正在下载 %1$.1f / %2$.1f MB</string>
     <string name="home_project_options">项目操作</string>
     <string name="home_project_filter_sessions">筛选项目会话</string>
     <string name="home_project_session_status">会话状态</string>

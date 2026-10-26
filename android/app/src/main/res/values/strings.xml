@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="document_checking">Checking the file on your device…</string>
+    <string name="document_download_progress">Downloading %1$.1f / %2$.1f MB</string>
     <string name="home_project_options">Project actions</string>
     <string name="home_project_filter_sessions">Filter project sessions</string>
     <string name="home_project_session_status">Session status</string>

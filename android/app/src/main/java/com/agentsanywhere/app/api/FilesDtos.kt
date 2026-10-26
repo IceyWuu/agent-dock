@@ -1,5 +1,7 @@
 package com.agentsanywhere.app.api
 
+data class PreparedFileDownload(val size: Long, val sha256: String, val downloadUrl: String)
+
 data class RemoteDirectory(
     val path: String,
     val entries: List<RemoteDirectoryEntry>,

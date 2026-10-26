@@ -52,23 +52,32 @@ class FilesApi(
     }
 
     /** Reuses the existing streamed filesystem transfer; never materializes PDFs as base64. */
-    fun downloadFile(serverUrl: String, authorizationToken: String, deviceId: String, root: String, path: String, target: java.io.File) {
+    fun prepareDownload(serverUrl: String, authorizationToken: String, deviceId: String, root: String, path: String): PreparedFileDownload {
         val prepared = client.postJson(
             serverUrl, "/connectors/${deviceId.urlEncode()}/fs/read?root=${root.urlEncode()}",
             JSONObject().put("path", path), authorizationToken,
         ).getJSONObject("result")
         val size = prepared.getLong("size")
         require(size in 0..256L * 1024 * 1024) { "File exceeds the 256 MB reading limit." }
+        val sha = prepared.getString("sha256").lowercase()
+        require(sha.matches(Regex("[0-9a-f]{64}"))) { "Invalid file checksum." }
         val origin = java.net.URI(requireNotNull(normalizeServerOrigin(serverUrl)))
         val url = origin.resolve(prepared.getString("downloadUrl"))
         require(url.scheme == origin.scheme && url.host == origin.host && url.port == origin.port && url.userInfo == null)
-        val request = okhttp3.Request.Builder().url(url.toString())
+        return PreparedFileDownload(size, sha, url.toString())
+    }
+
+    fun downloadPrepared(authorizationToken: String, prepared: PreparedFileDownload, target: java.io.File, onProgress: (Long, Long) -> Unit = { _, _ -> }) {
+        val size = prepared.size
+        val request = okhttp3.Request.Builder().url(prepared.downloadUrl)
             .header("Authorization", "Bearer $authorizationToken").build()
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         DOWNLOAD_CLIENT.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw ApiException("File download failed.", statusCode = response.code)
             val body = requireNotNull(response.body)
             var written = 0L
+            var reportedAt = 0L
+            onProgress(0, size)
             target.outputStream().use { output ->
                 body.byteStream().use { input ->
                     val buffer = ByteArray(64 * 1024)
@@ -80,13 +89,18 @@ class FilesApi(
                         require(written <= size) { "File download size mismatch." }
                         digest.update(buffer, 0, count)
                         output.write(buffer, 0, count)
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        if (now - reportedAt >= 100 || written == size) {
+                            onProgress(written, size)
+                            reportedAt = now
+                        }
                     }
                 }
             }
             require(written == size) { "File download is incomplete." }
         }
         val actual = digest.digest().joinToString("") { "%02x".format(it) }
-        require(actual == prepared.getString("sha256").lowercase()) { "File checksum mismatch." }
+        require(actual == prepared.sha256) { "File checksum mismatch." }
     }
 
     companion object {
