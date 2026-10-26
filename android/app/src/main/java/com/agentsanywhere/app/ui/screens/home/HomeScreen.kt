@@ -51,6 +51,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agentsanywhere.app.R
+import com.agentsanywhere.app.feature.sessions.ungroupedProjectSidebar
+import com.agentsanywhere.app.feature.sessions.isUngroupedWorkspace
 import com.agentsanywhere.app.api.AuthMeResponse
 import com.agentsanywhere.app.api.ApiException
 import com.agentsanywhere.app.feature.devices.DeviceAgentPreviews
@@ -166,6 +168,13 @@ fun HomeScreen(
             onLoadProjectSessions(id, projectSessionStatus)
         }
     }
+    LaunchedEffect(state.hasLoaded, state.devices, projectPreferences.selectedDeviceId) {
+        val selected = projectPreferences.selectedDeviceId
+        if (state.hasLoaded && selected != null && state.devices.none { it.id == selected }) projectPreferences.selectDevice(null)
+    }
+    LaunchedEffect(projectPreferences.selectedDeviceId, sidebarViewMode, state.sessions.size, state.activeHasMore) {
+        if (sidebarViewMode != HomeSidebarViewMode.Project && projectPreferences.selectedDeviceId != null && state.activeHasMore && !state.isLoadingMoreActive && state.errorMessage == null) onLoadMore(HomeTab.Active)
+    }
     var editingProject by remember { mutableStateOf<AgentProject?>(null) }
     var projectEditBusy by remember { mutableStateOf(false) }
     var projectEditError by remember { mutableStateOf<String?>(null) }
@@ -225,7 +234,9 @@ fun HomeScreen(
                         rowBounds = bounds,
                         projectView = sidebarViewMode == HomeSidebarViewMode.Project,
                         contextLabel = session.sidebarContextLabel(
-                            projectName = state.projects.firstOrNull { it.id == session.projectId }?.name,
+                            projectName = state.projects.firstOrNull { it.id == session.projectId }?.let {
+                                if (it.isUngroupedWorkspace()) context.getString(R.string.home_ungrouped) else it.name
+                            } ?: context.getString(R.string.home_ungrouped),
                             deviceName = state.devices.firstOrNull { it.id == session.connectorId }?.name,
                         ),
                     )
@@ -503,6 +514,11 @@ private fun HomeContent(
             onTerminalClick = { navigate(AppDestination.Terminal) },
             onFilesClick = { navigate(AppDestination.Files) },
         )
+        HomeDeviceSelector(
+            devices = state.devices,
+            selectedId = projectPreferences.selectedDeviceId,
+            onSelect = projectPreferences::selectDevice,
+        )
         PullToRefreshBox(
             isRefreshing = isRefreshing,
             state = refreshState,
@@ -541,7 +557,10 @@ private fun HomeContent(
                 )
             } else {
                 HomeList(
-                    state = state,
+                    state = state.copy(
+                        sessions = state.sessions.filter { projectPreferences.selectedDeviceId == null || it.connectorId == projectPreferences.selectedDeviceId },
+                        archivedSessions = state.archivedSessions.filter { projectPreferences.selectedDeviceId == null || it.connectorId == projectPreferences.selectedDeviceId },
+                    ),
                     tab = HomeTab.Active,
                     darkMode = darkMode,
                     onSessionLongPress = onSessionLongPress,
@@ -608,6 +627,9 @@ private fun HomeProjectModeList(
                 connectorId = projectPreferences.selectedDeviceId,
                 runtime = projectPreferences.selectedAgentRuntime,
             )
+            val ungrouped = remember(state.projects, allSessions, projectSessionStatus, deviceAgentFilter) {
+                ungroupedProjectSidebar(state.projects, allSessions, projectSessionStatus, deviceAgentFilter)
+            }
             val visibleSessions = remember(allSessions, projectSessionStatus, deviceAgentFilter) {
                 allSessions.filter {
                     it.projectId != null && projectSessionMatchesStatus(it, projectSessionStatus) && deviceAgentFilter.matches(it)
@@ -616,7 +638,11 @@ private fun HomeProjectModeList(
                     .mapValues { (_, sessions) -> sessions.sortedWith(sessionListComparator()) }
             }
             HomeProjectList(
-                projects = state.projects.filter { projectHasVisibleSessions(it, allSessions, projectSessionStatus, deviceAgentFilter) },
+                projects = ungrouped.projects.filter { projectHasVisibleSessions(it, allSessions, projectSessionStatus, deviceAgentFilter) },
+                ungroupedSessions = ungrouped.sessions,
+                ungroupedLoading = ungrouped.sourceProjectIds.any { it in loadingProjectIds },
+                ungroupedError = ungrouped.sourceProjectIds.any { it in projectErrors },
+                onRetryUngrouped = { ungrouped.sourceProjectIds.filter { it in projectErrors }.forEach(onRetryProject) },
                 devices = state.devices,
                 agentRuntimes = remember(allSessions) {
                     allSessions.map(AgentSession::runtime).filter(String::isNotBlank).distinct().sortedBy(String::runtimeTypeLabel)

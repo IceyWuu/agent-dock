@@ -42,7 +42,7 @@ internal fun mergeRemoteTimelineItems(
     val normalizedOrderById = orderingItems.associateBy { it.id }
     val incomingMessages = latestIncoming.flatMap { item ->
         val orderSeq = normalizedOrderById[item.id]?.orderSeq ?: item.orderSeq
-        item.toTimelineMessages().map { it.copy(orderSeq = orderSeq) }
+        item.toTimelineMessages().map { it.copy(orderSeq = orderSeq, createdAt = item.createdAt) }
     }
     val messages = if (replace) {
         val previewAwareIncoming = incomingMessages.map { incomingMessage ->

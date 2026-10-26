@@ -707,7 +707,7 @@ class SessionsApi(
             },
             activeSessionCount = optInt("activeSessionCount", 0),
             lastActivityAt = optNullableString("lastActivityAt"),
-            createdAt = optString("createdAt", ""),
+            createdAt = optNullableString("createdAt").orEmpty(),
             updatedAt = optString("updatedAt", ""),
         )
     }
@@ -973,7 +973,7 @@ class SessionsApi(
             orderSeq = optInt("orderSeq", 0),
             revision = optInt("revision", 1),
             updatedSeq = optInt("updatedSeq", 0),
-            createdAt = optString("createdAt", ""),
+            createdAt = optNullableString("createdAt").orEmpty(),
             updatedAt = optNullableString("updatedAt"),
             contentHash = optString("contentHash", ""),
         )

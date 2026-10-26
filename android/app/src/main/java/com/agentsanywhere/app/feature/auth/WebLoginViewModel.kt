@@ -79,6 +79,15 @@ class WebLoginViewModel(application: Application) : AndroidViewModel(application
         }
         state = hostChoice.copy(openingOfficial = official, checkingSelfHost = !official)
         operation = viewModelScope.launch {
+            val shared = controller.connectSharedWorkspace(serverUrl)
+            if (shared.getOrDefault(false)) {
+                state = WebLoginState.Success
+                return@launch
+            }
+            if (shared.isFailure) {
+                showHostChoice(hostChoice.copy(errorMessage = shared.exceptionOrNull()?.message ?: "Could not connect."))
+                return@launch
+            }
             controller.createWebLoginSession(serverUrl)
                 .onSuccess { session -> state = WebLoginState.WebLogin(session) }
                 .onFailure { error ->

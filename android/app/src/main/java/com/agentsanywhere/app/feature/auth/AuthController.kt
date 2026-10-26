@@ -134,6 +134,17 @@ class AuthController(
         }
     }
 
+    suspend fun connectSharedWorkspace(serverUrl: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        runCatching {
+            val normalized = normalizeServerUrl(serverUrl) ?: error("Invalid server address.")
+            if (!api.authConfig(normalized).sharedWorkspaceEnabled) return@runCatching false
+            val auth = api.sharedSession(normalized)
+            currentCoroutineContext().ensureActive()
+            sessionStore.saveAuthSession(normalized, auth)
+            true
+        }.onFailure { if (it is CancellationException) throw it }
+    }
+
     suspend fun createWebLoginSession(serverUrl: String): Result<WebLoginSession> {
         val server = runCatching { resolveLoginServer(serverUrl) }.getOrElse {
             return Result.failure(it)

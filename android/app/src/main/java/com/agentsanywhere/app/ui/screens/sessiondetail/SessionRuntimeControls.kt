@@ -67,6 +67,10 @@ import com.agentsanywhere.app.feature.sessiondetail.argumentHint
 import com.agentsanywhere.app.feature.sessiondetail.buildPayload
 import com.agentsanywhere.app.feature.sessiondetail.coerceInput
 import com.agentsanywhere.app.feature.sessiondetail.inputRequestForm
+import com.agentsanywhere.app.feature.sessiondetail.requiresUserResponse
+import com.agentsanywhere.app.feature.sessiondetail.failureKind
+import com.agentsanywhere.app.feature.sessiondetail.RuntimeFailureKind
+import com.agentsanywhere.app.feature.sessiondetail.prioritizeResponses
 import com.agentsanywhere.app.feature.sessiondetail.inputFields
 import com.agentsanywhere.app.feature.sessiondetail.isComplete
 import com.agentsanywhere.app.ui.designsystem.LocalAAColors
@@ -176,6 +180,7 @@ internal fun RuntimeNoticeCard(
     composerAdjacent: Boolean = false,
     expanded: Boolean = true,
     onExpandedChange: ((Boolean) -> Unit)? = null,
+    responseUnavailableMessage: String? = null,
 ) {
     val colors = LocalAAColors.current
     val focusManager = LocalFocusManager.current
@@ -224,6 +229,7 @@ internal fun RuntimeNoticeCard(
             },
         ))
     }
+    val unsupportedQuestion = notice.interactionType == "input_request" && inputRequestForm == null
     val selectedActionId = noticeDraft.selectedActionId
     val rawValues = noticeDraft.rawValues
     val inputRequestDrafts = noticeDraft.answers
@@ -270,7 +276,7 @@ internal fun RuntimeNoticeCard(
             else -> if (action.style == "primary") 2 else 1
         }
     }
-    val useHeaderIconActions = composerAdjacent &&
+    val useHeaderIconActions = !unsupportedQuestion && composerAdjacent &&
         inputRequestForm == null &&
         orderedActions.isNotEmpty() &&
         orderedActions.size <= 3 &&
@@ -359,7 +365,14 @@ internal fun RuntimeNoticeCard(
             ) {
                 Text(
                     text = if (expanded) {
-                        stringResource(R.string.session_notice_pending_response)
+                        when {
+                            busy || notice.status in setOf("responding", "response_accepted", "resolving") -> stringResource(R.string.session_notice_processing)
+                            notice.requiresUserResponse -> stringResource(R.string.session_notice_pending_response)
+                            notice.failureKind == RuntimeFailureKind.Quota -> stringResource(R.string.session_quota_exhausted_title)
+                            notice.failureKind == RuntimeFailureKind.RateLimit -> stringResource(R.string.session_rate_limited_title)
+                            notice.failureKind == RuntimeFailureKind.Execution -> stringResource(R.string.session_execution_failed_title)
+                            else -> stringResource(R.string.session_runtime_paused_title)
+                        }
                     } else {
                         inputRequestForm?.questions?.firstOrNull()?.header?.takeIf(String::isNotBlank)
                             ?: notice.title
@@ -410,7 +423,11 @@ internal fun RuntimeNoticeCard(
                 )
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(
-                        text = notice.title,
+                        text = when (notice.failureKind) {
+                            RuntimeFailureKind.Quota -> stringResource(R.string.session_quota_exhausted_title)
+                            RuntimeFailureKind.RateLimit -> stringResource(R.string.session_rate_limited_title)
+                            else -> notice.title
+                        },
                         color = colors.ink,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -449,6 +466,16 @@ internal fun RuntimeNoticeCard(
             )
         }
 
+        if (unsupportedQuestion) {
+            Text(stringResource(R.string.session_question_unsupported), color = colors.muted, fontSize = 12.sp)
+        } else if (actionsDisabled && !busy && notice.requiresUserResponse) {
+            Text(responseUnavailableMessage ?: stringResource(R.string.session_response_unavailable), color = colors.muted, fontSize = 12.sp)
+        }
+        when (notice.failureKind) {
+            RuntimeFailureKind.Quota -> Text(stringResource(R.string.session_quota_exhausted_hint), color = colors.muted, fontSize = 12.sp)
+            RuntimeFailureKind.RateLimit -> Text(stringResource(R.string.session_rate_limited_hint), color = colors.muted, fontSize = 12.sp)
+            else -> Unit
+        }
         if (!notificationOnly && notice.actions.isNotEmpty() && !useHeaderIconActions) {
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
@@ -465,7 +492,7 @@ internal fun RuntimeNoticeCard(
                     RuntimeNoticeActionButton(
                         action = action,
                         busy = busy && selectedActionId == action.actionId,
-                        enabled = !disabled && !inputActionIncomplete,
+                        enabled = !disabled && !inputActionIncomplete && !(unsupportedQuestion && action.actionId !in setOf("cancel", "dismiss")),
                         composerAdjacent = composerAdjacent,
                         onClick = { triggerAction(action) },
                     )
@@ -573,12 +600,12 @@ private fun RuntimeNoticeActionButton(
         Box(
             modifier = modifier
                 .widthIn(min = 68.dp)
-                .height(32.dp)
+                .heightIn(min = 36.dp)
                 .clip(shape)
                 .background(background)
                 .graphicsLayer { alpha = buttonAlpha }
                 .then(if (enabled) Modifier.noRippleClickable(onClick = onClick) else Modifier)
-                .padding(horizontal = 14.dp),
+                .padding(horizontal = 14.dp, vertical = 7.dp),
             contentAlignment = Alignment.Center,
         ) {
             Crossfade(
@@ -882,12 +909,14 @@ internal fun BlockingRuntimeNoticeStack(
     canRespond: Boolean,
     onRespond: (RuntimeNotice, RuntimeNoticeAction, Map<String, Any?>?) -> Unit,
     modifier: Modifier = Modifier,
+    responseUnavailableMessage: String? = null,
 ) {
     if (notices.isEmpty()) return
     val colors = LocalAAColors.current
-    val active = notices.first()
+    val orderedNotices = notices.prioritizeResponses()
+    val active = orderedNotices.first()
     var expanded by rememberSaveable(active.noticeId) { mutableStateOf(true) }
-    val backing = if (expanded) notices.drop(1).take(3).asReversed() else emptyList()
+    val backing = if (expanded) orderedNotices.drop(1).take(3).asReversed() else emptyList()
     val inputRequest = active.inputRequestForm()
     val maxCardHeight = LocalConfiguration.current.screenHeightDp.dp *
         if (inputRequest != null) 0.58f else 0.38f
@@ -918,6 +947,7 @@ internal fun BlockingRuntimeNoticeStack(
             errorMessage = responseErrors[active.noticeId],
             onRespond = { action, input -> onRespond(active, action, input) },
             composerAdjacent = true,
+            responseUnavailableMessage = responseUnavailableMessage,
             expanded = expanded,
             onExpandedChange = { expanded = it },
             modifier = Modifier

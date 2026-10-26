@@ -1,6 +1,7 @@
 export type UserRole = "admin" | "member";
 
 export type AuthConfig = {
+  sharedWorkspaceEnabled?: boolean;
   needsBootstrap: boolean;
   emailVerificationRequired: boolean;
   registrationOpen: boolean;

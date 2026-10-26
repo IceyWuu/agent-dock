@@ -4,6 +4,7 @@ import os
 import re
 import secrets
 import time
+from typing import Annotated
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -98,6 +99,7 @@ async def auth_config(
     oauth_config = await db.get_oauth_provider_config()
     email_enabled = bool((await get_email_settings(db)).get("enabled"))
     return AuthConfigResponse(
+        sharedWorkspaceEnabled=bool(getattr(request.app.state, "shared_workspace_user_id", None)),
         emailVerificationRequired=email_enabled,
         needsBootstrap=needs_bootstrap,
         registrationOpen=await db.is_registration_open(),
@@ -108,6 +110,20 @@ async def auth_config(
         setupTokenExpiresAt=expires_at,
         serverTime=utc_now(),
     )
+
+
+@router.post("/auth/shared-session", response_model=AuthResponse)
+async def shared_session(request: Request, db: Annotated[Store, Depends(get_store)]) -> AuthResponse:
+    user_id = getattr(request.app.state, "shared_workspace_user_id", None)
+    if not user_id:
+        raise HTTPException(status_code=404, detail="shared workspace is not enabled")
+    try:
+        user = await db.get_user(user_id)
+    except KeyError:
+        raise HTTPException(status_code=403, detail="shared workspace user no longer exists") from None
+    if user.disabled:
+        raise HTTPException(status_code=403, detail="shared workspace user disabled")
+    return _auth_response(user)
 
 
 @router.post("/auth/password-salt", response_model=AuthPasswordSaltResponse)

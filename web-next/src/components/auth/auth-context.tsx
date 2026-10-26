@@ -191,6 +191,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     clearOAuthQueryParams()
 
     async function boot() {
+      let sharedWorkspace = false
       if (initialOAuthError && !cancelled) {
         setError(initialOAuthError)
       }
@@ -203,12 +204,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setEmailVerificationRequired(config.emailVerificationRequired)
           setPasswordResetEnabled(config.passwordResetEnabled === true)
         }
+        sharedWorkspace = config.sharedWorkspaceEnabled === true
+        if (sharedWorkspace) {
+          const auth = await authApi.sharedSession()
+          const shared = authResponseToSession(auth)
+          const currentUser = await authApi.me(shared.accessToken)
+          if (cancelled) return
+          saveStoredSession(shared)
+          setSession(shared)
+          setMe(currentUser)
+          setError(null)
+          setScreenState(nextScreen === "mobile-oauth" || nextScreen === "desktop-oauth" || nextScreen === "plugin-oauth" ? nextScreen : "app")
+          setLoading(false)
+          return
+        }
         if (config.needsBootstrap && !cancelled) {
           setScreenState("bootstrap")
           setLoading(false)
           return
         }
-      } catch {
+      } catch (err) {
+        if (sharedWorkspace) {
+          if (!cancelled) {
+            clearStoredSession()
+            setError(err instanceof Error ? err.message : "Could not connect.")
+            setScreenState("login")
+            setLoading(false)
+          }
+          return
+        }
         // Server unreachable — fall through to normal auth flow.
       }
       if (initialOAuthPending) {

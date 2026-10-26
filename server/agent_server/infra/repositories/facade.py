@@ -22,12 +22,14 @@ from agent_server.infra.repositories.shares import SessionShareRepositoryMixin
 from agent_server.infra.repositories.store_support import *
 from agent_server.infra.repositories.timeline import TimelineRepositoryMixin
 from agent_server.infra.repositories.users import UserRepositoryMixin
+from agent_server.infra.repositories.shared_workspace import SharedWorkspaceRepositoryMixin
 
 _MAX_TRACKED_LOCKS = 4096
 _TRACKED_LOCK_IDLE_SECONDS = 900.0
 
 
 class Store(
+    SharedWorkspaceRepositoryMixin,
     DeviceRuntimeRepositoryMixin,
     ProtocolCatalogRepositoryMixin,
     UserRepositoryMixin,

@@ -82,6 +82,7 @@ import kotlinx.coroutines.sync.withPermit
 import android.os.SystemClock
 import java.util.concurrent.atomic.AtomicBoolean
 import java.io.File
+import kotlinx.coroutines.delay
 
 @Composable
 fun AgentsAnywhereApp(
@@ -104,7 +105,7 @@ fun AgentsAnywhereApp(
             if (sessionStore.hasAuthSession()) {
                 AppDestination.Sessions.name
             } else {
-                AppDestination.LoginMethods.name
+                AppDestination.ServerSetup.name
             },
         )
     }
@@ -175,6 +176,7 @@ fun AgentsAnywhereApp(
         SessionRealtimeController(realtimeApi, sessionStore, realtimeClientId)
     }
     val currentDestination = AppDestination.valueOf(destinationName)
+    var sharedSessionRevision by remember { mutableStateOf(0) }
     val hasAuthSession = sessionStore.hasAuthSession()
     val updateServerUrl = sessionStore.readServerUrl()
     val updatesAllowed = hasAuthSession && updateServerUrl.isNotBlank() && currentDestination !in setOf(
@@ -226,6 +228,13 @@ fun AgentsAnywhereApp(
         appVisible = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+    LaunchedEffect(appVisible, updatesAllowed, updateServerUrl) {
+        if (!appVisible || !updatesAllowed) return@LaunchedEffect
+        while (true) {
+            appUpdateViewModel.checkForUpdate(showPrompt = true)
+            delay(5 * 60 * 1000L)
+        }
+    }
     DisposableEffect(context, dashboardRealtimeController, sessionRealtimeController) {
         val connectivity = context.getSystemService(ConnectivityManager::class.java)
         val networkWasLost = AtomicBoolean(false)
@@ -267,11 +276,30 @@ fun AgentsAnywhereApp(
         selectedDeviceId = null
         pendingMobileLoginQr = null
         webLoginViewModel.resetForSignedOutEntry()
-        destinationName = AppDestination.LoginMethods.name
+        destinationName = AppDestination.ServerSetup.name
+    }
+
+    LaunchedEffect(authController) {
+        val savedServer = sessionStore.readServerUrl()
+        val wasAuthenticated = sessionStore.hasAuthSession()
+        val previousUser = sessionStore.readUserId()
+        if (savedServer.isNotBlank() && authController.connectSharedWorkspace(savedServer).getOrDefault(false)) {
+            sharedSessionRevision += 1
+            if (!wasAuthenticated || previousUser != sessionStore.readUserId()) {
+                destinationName = AppDestination.Sessions.name
+                sessionsState = SessionsState(isLoading = true)
+                projectSessionsById = emptyMap()
+            }
+        }
     }
 
     LaunchedEffect(unauthorizedTokens) {
         for (accessToken in unauthorizedTokens) {
+            if (sessionStore.readAccessToken() == accessToken &&
+                authController.connectSharedWorkspace(sessionStore.readServerUrl()).getOrDefault(false)) {
+                sharedSessionRevision += 1
+                continue
+            }
             clearSessionAndReturnToLogin(expectedToken = accessToken)
         }
     }
@@ -451,6 +479,7 @@ fun AgentsAnywhereApp(
     }
     LaunchedEffect(
         hasAuthSession,
+        sharedSessionRevision,
         appVisible,
         realtimeServerUrl,
         realtimeAccessToken,

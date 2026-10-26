@@ -232,8 +232,9 @@ uv run pytest -q
 ## Client version checks
 
 `GET /api/v2/health` and `/api/v2/health/live` include `version`, matching the
-Server application version. Desktop and Android compare their installed version
-with this value and use fixed download addresses from their own configuration.
+Server application version. Desktop compares its installed version with this
+value and uses its configured download address. Android 2.1.2+ checks an independent
+static release manifest on the connected server; see [Android updates](../docs/api/android-updates.md).
 The `/client-releases/check` and `/admin/client-releases` APIs and the release
 management page have been retired.
 

@@ -839,6 +839,12 @@
       "sessions": "Sessions"
     },
     "session": {
+      "messageTimeSent": "Sent {time}",
+      "messageTimeReceived": "Received {time}",
+      "messageTimeSending": "Sending {time}",
+      "messageTimeFailed": "Failed {time}",
+      "messageTimeUnknown": "Time not recorded",
+
       "device": "Device",
       "status": "Status",
       "sessionId": "Session ID",

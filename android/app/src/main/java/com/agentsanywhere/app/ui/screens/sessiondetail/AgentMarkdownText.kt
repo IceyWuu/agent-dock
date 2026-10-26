@@ -10,12 +10,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -37,8 +35,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -110,6 +110,7 @@ private const val SelectionCodeTokenPrefix = "[[AA_SELECT_CODE:"
 private val TableDelimiterCellRegex = Regex(""":?-{1,}:?""")
 
 private val markdownParser = Parser.builder()
+    .customInlineContentParserFactory(MarkdownMathParserFactory())
     .extensions(
         listOf<Extension>(
             AutolinkExtension.create(),
@@ -163,16 +164,18 @@ private fun MarkdownBlocks(
     nodes.forEach { node ->
         when (node) {
             is Paragraph -> {
-                val standaloneCode = node.children().singleOrNull() as? Code
-                if (standaloneCode != null && standaloneCode.literal.needsWrappingCode()) {
-                    MarkdownWrappingCodeChip(
-                        code = standaloneCode.literal,
-                        path = parseFileRef(standaloneCode.literal),
-                        styles = styles,
-                        onOpenFile = onOpenFile,
-                    )
-                } else {
-                    MarkdownInlineText(node.children(), styles.body, styles, onOpenFile, onOpenUrl)
+                paragraphMathParts(node.children()).forEach { part ->
+                    val single = part.singleOrNull()
+                    when {
+                        single is MarkdownMathNode && single.display -> MarkdownMathBlock(single, styles.body)
+                        single is Code && single.literal.needsWrappingCode() -> MarkdownWrappingCodeChip(
+                            code = single.literal,
+                            path = parseFileRef(single.literal),
+                            styles = styles,
+                            onOpenFile = onOpenFile,
+                        )
+                        else -> MarkdownInlineText(part, styles.body, styles, onOpenFile, onOpenUrl)
+                    }
                 }
             }
             is Heading -> MarkdownInlineText(node.children(), styles.heading(node.level), styles, onOpenFile, onOpenUrl)
@@ -258,22 +261,17 @@ private fun MarkdownQuote(
     onOpenFile: (String) -> Unit,
     onOpenUrl: (String) -> Unit,
 ) {
-    Row(
-        modifier = Modifier.height(IntrinsicSize.Min),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    // Measure the content normally, then draw the rule at its measured height.
+    // Intrinsic height queries crash for subcomposed children such as formulas
+    // and code panels when an older quote first enters the scrolling viewport.
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawBehind { drawRect(styles.border, size = Size(2.dp.toPx(), size.height)) }
+            .padding(start = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Box(
-            Modifier
-                .fillMaxHeight()
-                .width(2.dp)
-                .background(styles.border),
-        )
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            MarkdownBlocks(nodes, darkMode, styles.copy(bodyColor = styles.muted), onOpenFile, onOpenUrl)
-        }
+        MarkdownBlocks(nodes, darkMode, styles.copy(bodyColor = styles.muted), onOpenFile, onOpenUrl)
     }
 }
 
@@ -327,10 +325,30 @@ private fun MarkdownInlineText(
     onOpenFile: (String) -> Unit,
     onOpenUrl: (String) -> Unit,
 ) {
+    // Ordinary messages keep the original BasicText layout. Only formulas need
+    // the available width to constrain an inline attachment's scroll viewport.
+    if (nodes.any { it.containsMath() }) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            MarkdownInlineTextContent(nodes, textStyle, styles, onOpenFile, onOpenUrl, constraints.maxWidth)
+        }
+    } else {
+        MarkdownInlineTextContent(nodes, textStyle, styles, onOpenFile, onOpenUrl, Int.MAX_VALUE)
+    }
+}
+
+@Composable
+private fun MarkdownInlineTextContent(
+    nodes: List<Node>,
+    textStyle: TextStyle,
+    styles: MarkdownStyles,
+    onOpenFile: (String) -> Unit,
+    onOpenUrl: (String) -> Unit,
+    maxWidthPx: Int,
+) {
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
-    val inline = remember(nodes, styles, density, textMeasurer, onOpenFile) {
-        buildMarkdownInline(nodes, styles, textMeasurer, density, onOpenFile)
+    val inline = remember(nodes, textStyle, styles, density, textMeasurer, maxWidthPx, onOpenFile) {
+        buildMarkdownInline(nodes, textStyle, styles, textMeasurer, density, maxWidthPx, onOpenFile)
     }
     var layoutResult by remember(inline.text) { mutableStateOf<TextLayoutResult?>(null) }
 
@@ -363,9 +381,11 @@ private data class MarkdownInlineRender(
 
 private fun buildMarkdownInline(
     nodes: List<Node>,
+    textStyle: TextStyle,
     styles: MarkdownStyles,
     textMeasurer: androidx.compose.ui.text.TextMeasurer,
     density: Density,
+    maxWidthPx: Int,
     onOpenFile: (String) -> Unit,
 ): MarkdownInlineRender {
     val inlineContent = mutableMapOf<String, InlineTextContent>()
@@ -374,6 +394,16 @@ private fun buildMarkdownInline(
         fun appendNodes(nodes: List<Node>) {
             nodes.forEach { node ->
                 when (node) {
+                    is MarkdownMathNode -> {
+                        val content = mathInlineContent(node, textStyle, density, maxWidthPx)
+                        if (content == null) {
+                            append(node.source)
+                        } else {
+                            val id = "math-${nextInlineId++}"
+                            appendInlineContent(id, node.source)
+                            inlineContent[id] = content
+                        }
+                    }
                     is Text -> append(node.literal)
                     is SoftLineBreak -> append(" ")
                     is HardLineBreak -> append("\n")
@@ -868,6 +898,30 @@ private fun Node.children(): List<Node> {
         child = child.next
     }
     return out
+}
+
+private fun Node.containsMath(): Boolean {
+    if (this is MarkdownMathNode) return true
+    var child = firstChild
+    while (child != null) {
+        if (child.containsMath()) return true
+        child = child.next
+    }
+    return false
+}
+
+private fun paragraphMathParts(nodes: List<Node>): List<List<Node>> = buildList {
+    var inline = mutableListOf<Node>()
+    for (node in nodes) {
+        if (node is MarkdownMathNode && node.display) {
+            if (inline.isNotEmpty()) add(inline)
+            add(listOf(node))
+            inline = mutableListOf()
+        } else {
+            inline += node
+        }
+    }
+    if (inline.isNotEmpty()) add(inline)
 }
 
 private fun Node.tableRows(): List<TableRow> {

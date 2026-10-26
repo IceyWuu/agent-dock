@@ -4,7 +4,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -20,12 +20,15 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agentsanywhere.app.model.AgentSession
 import com.agentsanywhere.app.feature.sessions.listIndicator
+import com.agentsanywhere.app.feature.sessions.sessionActivityTime
+import java.time.Instant
 import com.agentsanywhere.app.ui.designsystem.LocalAAColors
 
 @Composable
@@ -34,11 +37,12 @@ internal fun HomeProjectSessionRow(
     inset: Boolean = true,
     onClick: () -> Unit,
     onLongPress: (Rect) -> Unit,
+    now: Instant = Instant.now(),
 ) {
     val haptic = LocalHapticFeedback.current
     var bounds by remember { mutableStateOf(Rect.Zero) }
     Row(
-        modifier = Modifier.fillMaxWidth().height(44.dp)
+        modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp)
             .onGloballyPositioned { bounds = it.boundsInRoot() }
             .pointerInput(onClick, onLongPress, bounds) {
                 detectTapGestures(
@@ -63,5 +67,14 @@ internal fun HomeProjectSessionRow(
             overflow = TextOverflow.Ellipsis,
         )
         SessionStatusIndicator(session.listIndicator())
+        Text(
+            text = sessionActivityTime(session.sortAt?.takeIf(String::isNotBlank) ?: session.sortKey, now) ?: "—",
+            color = LocalAAColors.current.muted,
+            fontSize = 11.sp,
+            lineHeight = 14.sp,
+            fontFamily = FontFamily.Monospace,
+            softWrap = false,
+            maxLines = 1,
+        )
     }
 }

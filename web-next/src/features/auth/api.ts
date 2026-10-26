@@ -30,6 +30,10 @@ import type {
 export class AuthApi {
   constructor(private readonly client: ApiClient = apiClient) {}
 
+  sharedSession(): Promise<AuthResponse> {
+    return this.client.post<AuthResponse>("/auth/shared-session", {}, { auth: false });
+  }
+
   config(): Promise<AuthConfig> {
     return this.client.get<AuthConfig>("/auth/config", { auth: false });
   }

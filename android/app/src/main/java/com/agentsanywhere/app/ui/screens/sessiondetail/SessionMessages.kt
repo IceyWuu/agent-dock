@@ -1256,6 +1256,7 @@ private fun AgentMessageContent(
             onOpenAttachment = onOpenAttachment,
             alignEnd = false,
         )
+        MessageTimestamp(message)
     }
 }
 
@@ -1374,6 +1375,7 @@ private fun UserBubble(
                         }
                     }
                 }
+                MessageTimestamp(message)
                 if (meta.isNotBlank()) {
                     DisableSelection {
                         Text(

@@ -26,6 +26,7 @@ data class TimelineOrderingItem(
 data class TimelineMessage(
     val id: String,
     val sourceItemId: String = id,
+    val createdAt: String? = null,
     val author: MessageAuthor,
     val text: String,
     val attachments: List<TimelineAttachment> = emptyList(),

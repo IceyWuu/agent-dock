@@ -114,6 +114,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false)
         return
       }
+      try {
+        if (getDesktopServerConnection() && (await authApi.config()).sharedWorkspaceEnabled) {
+          const auth = await authApi.sharedSession()
+          const currentUser = normalizeAuthMe(await authApi.me(auth.accessToken), auth)
+          if (cancelled) return
+          const shared: StoredSession = { accessToken: auth.accessToken, userId: auth.userId, role: auth.role, serverUrl: getDesktopServerConnection()?.serverUrl }
+          saveStoredSession(shared)
+          setSession(shared)
+          setMe(currentUser)
+          setScreenState(nextScreen === "onboarding" ? nextScreen : "app")
+          setLoading(false)
+          return
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Could not connect.")
+          setScreenState("login")
+          setLoading(false)
+        }
+        return
+      }
       if (!stored) {
         if (!cancelled) {
           setScreenState(nextScreen === "app" ? "login" : nextScreen)

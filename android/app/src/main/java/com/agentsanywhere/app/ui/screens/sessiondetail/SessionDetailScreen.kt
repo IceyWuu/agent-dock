@@ -103,6 +103,10 @@ import com.agentsanywhere.app.feature.sessiondetail.RuntimeCommandBlock
 import com.agentsanywhere.app.feature.sessiondetail.RuntimeCommandExecutionState
 import com.agentsanywhere.app.feature.sessiondetail.RuntimeCommandUi
 import com.agentsanywhere.app.feature.sessiondetail.RuntimeNotice
+import com.agentsanywhere.app.feature.sessiondetail.requiresUserResponse
+import com.agentsanywhere.app.feature.sessiondetail.failureKind
+import com.agentsanywhere.app.feature.sessiondetail.runtimeFailureKind
+import com.agentsanywhere.app.feature.sessiondetail.RuntimeFailureKind
 import com.agentsanywhere.app.feature.sessiondetail.RuntimeNoticeAction
 import com.agentsanywhere.app.feature.sessiondetail.SlashIntent
 import com.agentsanywhere.app.feature.sessiondetail.allowed
@@ -1291,6 +1295,13 @@ fun SessionDetailScreen(
         val id = sessionId.orEmpty()
         openInteractions.filter { it.blocksSession(id) }
     }
+    val blockingFailure = blockingNotices.firstNotNullOfOrNull { it.failureKind } ?: runtimeFailureKind(state.runtime.error)
+    val needsUserResponse = blockingNotices.any { it.requiresUserResponse }
+    val responseUnavailableMessage = when {
+        !connectorOnline -> stringResource(R.string.session_response_device_offline)
+        !takeoverEnabled -> stringResource(R.string.session_response_takeover_required)
+        else -> stringResource(R.string.session_response_unavailable)
+    }
     val runtimeBlocksSubmission = runtimeStatus in setOf(
         SessionRuntimeStatus.Waiting,
         SessionRuntimeStatus.Pending,
@@ -1619,9 +1630,12 @@ fun SessionDetailScreen(
         ?: stringResource(R.string.session_agent_fallback)
     val placeholder = when {
         isPreparedSession -> stringResource(R.string.session_reply_to, replyTarget)
+        needsUserResponse -> if (canRespondToNotice) stringResource(R.string.session_waiting_approval_placeholder) else responseUnavailableMessage
+        blockingFailure == RuntimeFailureKind.Quota -> stringResource(R.string.session_quota_exhausted_hint)
+        blockingFailure == RuntimeFailureKind.RateLimit -> stringResource(R.string.session_rate_limited_hint)
+        blockingNotices.isNotEmpty() -> stringResource(R.string.session_runtime_paused_hint)
         !takeoverEnabled -> stringResource(R.string.session_read_only_placeholder)
         state.session != null && !connectorOnline -> stringResource(R.string.session_device_offline_placeholder)
-        blockingNotices.isNotEmpty() -> stringResource(R.string.session_waiting_approval_placeholder)
         state.runtime.errorMessage != null -> state.runtime.errorMessage.orEmpty()
         state.runtime.error?.get("code") == "DSH_CONCURRENT_WRITER_DETECTED" ->
             stringResource(R.string.session_dsh_concurrent_writer)
@@ -1630,8 +1644,8 @@ fun SessionDetailScreen(
             stringResource(R.string.session_pending_placeholder)
         runtimeStatus in setOf(SessionRuntimeStatus.Running, SessionRuntimeStatus.Stopping) ->
             stringResource(R.string.session_busy_placeholder)
-        runtimeStatus in setOf(SessionRuntimeStatus.WaitingApproval, SessionRuntimeStatus.Blocked) ->
-            stringResource(R.string.session_waiting_approval_placeholder)
+        runtimeStatus == SessionRuntimeStatus.WaitingApproval -> stringResource(R.string.session_local_input_hint)
+        runtimeStatus == SessionRuntimeStatus.Blocked -> stringResource(R.string.session_runtime_paused_hint)
         runtimeStatus == SessionRuntimeStatus.Error -> stringResource(R.string.session_error_placeholder)
         runtimeStatus == SessionRuntimeStatus.Disconnected -> stringResource(R.string.session_device_offline_placeholder)
         !canUseSendMessage && !canUseCommands -> stringResource(R.string.session_send_unavailable)
@@ -1738,6 +1752,7 @@ fun SessionDetailScreen(
                                     respondingNoticeIds = state.respondingNoticeIds,
                                     responseErrors = noticeResponseErrors,
                                     canRespond = canRespondToNotice,
+                                    responseUnavailableMessage = responseUnavailableMessage,
                                     onRespond = ::respondNotice,
                                 )
                                 if (showCommandSuggestions) {

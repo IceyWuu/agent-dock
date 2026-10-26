@@ -13,6 +13,12 @@ import org.json.JSONArray
 internal class HomeProjectPreferences(private val storage: SharedPreferences, private val key: String) {
     var expandedIds by mutableStateOf(storage.getStringSet("$key:ids", emptySet()).orEmpty().toSet())
         private set
+    var ungroupedExpanded by mutableStateOf(storage.getBoolean("$key:ungrouped", false))
+        private set
+    fun toggleUngrouped() {
+        ungroupedExpanded = !ungroupedExpanded
+        storage.edit().putBoolean("$key:ungrouped", ungroupedExpanded).apply()
+    }
     var projectsExpanded by mutableStateOf(storage.getBoolean("$key:section", true))
         private set
     var sessionStatus by mutableStateOf(

@@ -1,6 +1,41 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "时间未记录": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Time not recorded" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "时间未记录" } }
+      }
+    },
+    "发送中": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Sending" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "发送中" } }
+      }
+    },
+    "发送失败": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Failed" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "发送失败" } }
+      }
+    },
+    "发送于": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Sent" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "发送于" } }
+      }
+    },
+    "收到于": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Received" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "收到于" } }
+      }
+    },
     "": {
       "extractionState": "manual",
       "localizations": {

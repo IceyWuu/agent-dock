@@ -128,6 +128,8 @@ def create_app(
             app.state.database_schema_version = await database_schema_version(
                 app.state.store.engine
             )
+            if os.environ.get("AGENT_SERVER_SHARED_WORKSPACE", "").strip().lower() in {"1", "true", "yes"}:
+                app.state.shared_workspace_user_id = await app.state.store.prepare_shared_workspace()
             await app.state.redis.start()
             await app.state.timeline_broker.start()
             await app.state.timeline_write_buffer.start()
@@ -170,7 +172,7 @@ def create_app(
                                 finally:
                                     await app.state.store.close()
 
-    app = FastAPI(title="Agent Server", version="2.0.3", lifespan=lifespan)
+    app = FastAPI(title="Agent Server", version="2.1.0", lifespan=lifespan)
     app.add_exception_handler(
         ConnectorServiceError,
         error_handlers.connector_service_error_handler,

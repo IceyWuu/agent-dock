@@ -16,13 +16,17 @@ struct SessionTimelineRow: View {
             case let .message(message):
                 let files = chat.session.attachmentPreviews.resolve(message.attachments, clientID: row.value.source["clientMessageId"]?.stringValue)
                 if row.value.role == .user {
-                    UserMessageBubble(text: row.text, attachments: files, onAttachment: onAttachment, loadThumbnail: chat.thumbnail)
+                    VStack(alignment: .trailing, spacing: 6) {
+                        UserMessageBubble(text: row.text, attachments: files, onAttachment: onAttachment, loadThumbnail: chat.thumbnail)
+                        messageTime
+                    }.frame(maxWidth: .infinity, alignment: .trailing)
                 } else {
                     VStack(alignment: .leading, spacing: 14) {
                         markdown
                         if !files.isEmpty {
                             ChatMessageAttachments(files: files, onOpen: onAttachment, loadThumbnail: chat.thumbnail, alignment: .leading)
                         }
+                        messageTime
                         // Waiting feedback lives in the fixed header slot. An
                         // extra placeholder row would disappear on the first token.
                         if !row.value.isStreamingText {
@@ -42,6 +46,19 @@ struct SessionTimelineRow: View {
         .traceChatLayout("row:\(row.id)", state: "generation=\(row.layoutGeneration), status=\(row.value.status.rawValue)")
         // Long presses belong to the text selection interaction inside the row.
         // A row-wide context menu would intercept them and highlight the item.
+    }
+
+    private var messageTime: some View {
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = parser.date(from: row.value.createdAt) ?? ISO8601DateFormatter().date(from: row.value.createdAt)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let time = date.map { formatter.string(from: $0) } ?? String(localized: "时间未记录")
+        let prefix = row.value.role == .user
+            ? (row.value.status == .pending ? String(localized: "发送中") : row.value.status == .failed ? String(localized: "发送失败") : String(localized: "发送于"))
+            : String(localized: "收到于")
+        return Text("\(prefix) \(time)").font(.caption2).foregroundStyle(.secondary)
     }
 
     private var markdown: some View {

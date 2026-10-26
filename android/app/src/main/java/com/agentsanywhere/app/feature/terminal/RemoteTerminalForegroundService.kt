@@ -18,7 +18,17 @@ class RemoteTerminalForegroundService : Service() {
         startTerminalForeground()
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Every delivered start must satisfy Android's foreground deadline,
+        // including a stop queued while the service was still being created.
+        startTerminalForeground()
+        if (intent?.action == ACTION_STOP) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        return START_STICKY
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -65,6 +75,7 @@ class RemoteTerminalForegroundService : Service() {
     }
 
     companion object {
+        private const val ACTION_STOP = "com.agentsanywhere.app.STOP_REMOTE_TERMINAL"
         private const val CHANNEL_ID = "remote_terminal"
         private const val NOTIFICATION_ID = 2001
 
@@ -74,7 +85,9 @@ class RemoteTerminalForegroundService : Service() {
         }
 
         fun stop(context: Context) {
-            context.stopService(Intent(context, RemoteTerminalForegroundService::class.java))
+            // Queue shutdown after pending starts rather than cancelling service
+            // creation before it has a chance to call startForeground().
+            context.startService(Intent(context, RemoteTerminalForegroundService::class.java).setAction(ACTION_STOP))
         }
     }
 }

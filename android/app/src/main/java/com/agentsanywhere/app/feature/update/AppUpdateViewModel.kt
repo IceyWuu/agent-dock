@@ -9,7 +9,6 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.agentsanywhere.app.api.AndroidAppRelease
 import com.agentsanywhere.app.api.AppUpdatesApi
-import com.agentsanywhere.app.api.compareUpdateVersions
 import com.agentsanywhere.app.BuildConfig
 import com.agentsanywhere.app.feature.auth.AuthSessionStore
 import java.io.File
@@ -82,7 +81,7 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
             }.onSuccess { release ->
                 if (!isCurrentSession(serverUrl, generation)) return@onSuccess
                 val ignored = release != null && updatePreferences.getString(ignoredVersionKey, null)
-                    ?.let { compareUpdateVersions(it, release.versionName) == 0 } == true
+                    ?.let { it == release.versionCode.toString() } == true
                 state = state.copy(
                     checking = false,
                     checked = true,
@@ -156,7 +155,7 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
         state = state.copy(ignoring = true, ignoreFailed = false)
         viewModelScope.launch {
             val saved = withContext(Dispatchers.IO) {
-                runCatching { updatePreferences.edit().putString(preferenceKey, release.versionName).commit() }.getOrDefault(false)
+                runCatching { updatePreferences.edit().putString(preferenceKey, release.versionCode.toString()).commit() }.getOrDefault(false)
             }
             if (!isCurrentSession(serverUrl, generation)) return@launch
             val sameVersion = preferenceKey == ignoredVersionKey && state.release?.versionName == release.versionName
@@ -288,6 +287,7 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 }
             }
+            verifyUpdatePackage(getApplication(), target, release)
             target
         } catch (error: Throwable) {
             target.delete()

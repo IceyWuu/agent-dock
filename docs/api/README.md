@@ -8,6 +8,7 @@ All Server HTTP, SSE, and WebSocket API documentation should live under this dir
 
 ## Documents
 
+- [Shared workspace](./shared-workspace.md): optional password-free shared instance access in 2.1.
 - [Upgrading to v2](../upgrading.md): current deployment and client upgrade
   guidance, including legacy v1 migrations.
 - [API v2 namespace](./namespace.md): `/api/v2` namespace and client/connector URL rules.

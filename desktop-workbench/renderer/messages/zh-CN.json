@@ -858,6 +858,12 @@
       "waitingForScan": "等待手机扫码"
     },
     "session": {
+      "messageTimeSent": "发送于 {time}",
+      "messageTimeReceived": "收到于 {time}",
+      "messageTimeSending": "发送中 {time}",
+      "messageTimeFailed": "发送失败 {time}",
+      "messageTimeUnknown": "时间未记录",
+
       "device": "设备",
       "status": "状态",
       "sessionId": "会话 ID",

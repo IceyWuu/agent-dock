@@ -205,10 +205,20 @@ function MessageCard({
           </div>
         ) : null}
         {!isUser ? attachmentList : null}
+        <MessageTime item={item} />
         {showUserStatus ? <TimelineStatusBadge status={item.status} /> : null}
       </div>
     </div>
   )
+}
+
+function MessageTime({ item }: { item: TimelineItem }) {
+  const t = useTranslations("dashboard.session")
+  const date = item.createdAt ? new Date(item.createdAt) : null
+  const valid = date !== null && Number.isFinite(date.getTime())
+  const time = valid ? date.toLocaleString(undefined, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : t("messageTimeUnknown")
+  const label = item.role !== "user" ? "messageTimeReceived" : item.status === "failed" ? "messageTimeFailed" : item.status === "pending" ? "messageTimeSending" : "messageTimeSent"
+  return <time dateTime={valid ? item.createdAt! : undefined} className="select-none text-[11px] leading-4 text-muted-foreground">{t(label, { time })}</time>
 }
 
 function SystemCard({ token, session, item }: { token: string; session: SessionView; item: TimelineItem }) {

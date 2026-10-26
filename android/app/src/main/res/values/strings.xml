@@ -48,7 +48,7 @@
     <string name="auth_enter_server">Enter Server</string>
     <string name="auth_password_login">Account Password Login</string>
     <string name="auth_continue_qr">Scan to Login</string>
-    <string name="auth_host_choice_title">Choose a login service</string>
+    <string name="auth_host_choice_title">Connect to your server</string>
     <string name="auth_official_service">Sign in to Agents Anywhere Cloud</string>
     <string name="auth_official_service_description">Use the Agents Anywhere online service</string>
     <string name="auth_self_host_service">Connect to your own server instance</string>
@@ -56,7 +56,7 @@
     <string name="auth_connect_server">Connect to server</string>
     <string name="auth_self_host_service_description">Connect to a server you deployed</string>
     <string name="auth_coming_soon">Coming soon</string>
-    <string name="auth_host_choice_hint">If you do not have a privately deployed backend, sign in to Cloud.</string>
+    <string name="auth_host_choice_hint">Enter your server address. Shared workspaces open automatically without an account.</string>
     <string name="auth_self_host_login_title">Self-host Login</string>
     <string name="auth_web_login_subtitle">Enter your backend address. We will check the connection and open the sign-in page.</string>
     <string name="auth_backend_url">Backend address</string>
@@ -706,4 +706,23 @@
     <string name="announcement_title">Announcement</string>
     <string name="announcement_published_at">Published %1$s</string>
     <string name="announcement_acknowledge">Got it</string>
+    <string name="session_time_sent">Sent %1$s</string>
+    <string name="session_time_received">Received %1$s</string>
+    <string name="session_time_sending">Sending %1$s</string>
+    <string name="session_time_failed">Failed %1$s</string>
+    <string name="session_time_unknown">Time not recorded</string>
+    <string name="session_notice_processing">Processing…</string>
+    <string name="session_quota_exhausted_title">AI usage limit reached</string>
+    <string name="session_quota_exhausted_hint">Wait for your usage limit to reset, then send a message to retry.</string>
+    <string name="session_rate_limited_title">Requests are rate limited</string>
+    <string name="session_rate_limited_hint">Requests are rate limited. Try again later.</string>
+    <string name="session_execution_failed_title">Execution failed</string>
+    <string name="session_runtime_paused_title">Execution paused</string>
+    <string name="session_runtime_paused_hint">Execution paused. Check the error details above.</string>
+    <string name="session_local_input_hint">The local agent is waiting. No remote choices are available; check your computer.</string>
+    <string name="session_response_unavailable">Remote response is unavailable. Check the local agent on your computer.</string>
+    <string name="session_response_takeover_required">Enable takeover below to select and submit your answer.</string>
+    <string name="session_response_device_offline">Device offline. Reconnect your computer to submit an answer.</string>
+    <string name="session_question_unsupported">This question format is not supported yet. Answer it on your computer.</string>
+    <string name="home_ungrouped">Ungrouped</string>
 </resources>

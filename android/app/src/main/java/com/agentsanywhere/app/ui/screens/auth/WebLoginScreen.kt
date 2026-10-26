@@ -156,37 +156,14 @@ private fun HostChoiceScreen(
                 Spacer(Modifier.height(18.dp))
             }
             Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                LoginMethodButton(
-                    label = stringResource(
-                        if (state.openingOfficial) R.string.auth_opening_web_login else R.string.auth_official_service,
-                    ),
-                    primary = true,
-                    enabled = state.officialServiceAvailable && !state.isBusy,
-                    onClick = onOfficial,
-                )
-                if (!state.selfHostExpanded) {
+                SelfHostLoginForm(state, onServerUrlChanged, onConnect)
+                if (state.officialServiceAvailable) {
                     LoginMethodButton(
-                        label = stringResource(R.string.auth_self_host_service),
+                        label = stringResource(if (state.openingOfficial) R.string.auth_opening_web_login else R.string.auth_official_service),
                         primary = false,
                         enabled = !state.isBusy,
-                        onClick = onSelfHost,
+                        onClick = onOfficial,
                     )
-                }
-                AnimatedVisibility(
-                    visible = state.selfHostExpanded,
-                    enter = expandVertically() + fadeIn(),
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            HorizontalDivider(Modifier.weight(1f), color = colors.ink.copy(alpha = 0.12f))
-                            Text(stringResource(R.string.auth_or), color = colors.muted, fontSize = 14.sp)
-                            HorizontalDivider(Modifier.weight(1f), color = colors.ink.copy(alpha = 0.12f))
-                        }
-                        SelfHostLoginForm(state, onServerUrlChanged, onConnect)
-                    }
                 }
             }
         }

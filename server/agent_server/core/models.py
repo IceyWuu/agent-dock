@@ -263,6 +263,7 @@ class AuthMeResponse(BaseModel):
 
 
 class AuthConfigResponse(BaseModel):
+    sharedWorkspaceEnabled: bool = False
     emailVerificationRequired: bool = False
     needsBootstrap: bool
     registrationOpen: bool

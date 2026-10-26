@@ -710,6 +710,7 @@ class SessionDetailController(
             updatedSeq = optimisticOrderSeq,
             clientMessageId = clientMessageId,
             optimistic = true,
+            createdAt = java.time.Instant.now().toString(),
         )
         optimisticStore.upsert(sessionId, message)
         return state.copy(

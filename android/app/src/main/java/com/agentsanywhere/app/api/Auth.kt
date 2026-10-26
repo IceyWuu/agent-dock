@@ -5,6 +5,10 @@ import org.json.JSONObject
 class AuthApi(
     private val client: ApiClient = ApiClient(),
 ) {
+    fun sharedSession(serverUrl: String): AuthResponse = client.postJson(
+        serverUrl = serverUrl, path = "/auth/shared-session", body = JSONObject(),
+    ).toAuthResponse()
+
     fun me(
         serverUrl: String,
         token: String,
@@ -189,6 +193,7 @@ class AuthApi(
 
     private fun JSONObject.toAuthConfigResponse(): AuthConfigResponse {
         return AuthConfigResponse(
+            sharedWorkspaceEnabled = optBoolean("sharedWorkspaceEnabled", false),
             needsBootstrap = optBoolean("needsBootstrap", false),
             emailVerificationRequired = optBoolean("emailVerificationRequired", false),
             registrationOpen = optBoolean("registrationOpen", false),

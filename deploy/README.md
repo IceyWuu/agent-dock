@@ -301,3 +301,15 @@ aa.example.com:8443 {
 - `agents-anywhere_agents-anywhere-pg-next`：PostgreSQL
 - `agents-anywhere_agents-anywhere-redis-next`：Redis（含尚未刷入数据库的 Timeline，别随便删）
 - `agents-anywhere_agents-anywhere-files-next`：上传的附件
+
+## 两人共用、免账号登录（2.1）
+
+备份后在 `deploy/.env` 设置 `AGENT_SERVER_SHARED_WORKSPACE=true`，更新源码并重建 Server/Web 镜像。首次启用会把现有设备、项目和会话汇入同一工作区，消息和附件保留，重名项目加序号；旧账号不会删除。此模式允许所有能访问服务地址的人使用设备、文件和终端，所以入口应只向两人开放。关闭开关不会自动拆回旧账号数据归属。
+
+Android 2.1 首次填服务地址点连接即可进入，以后自动连接；Web 刷新即可，iOS/桌面端通过新版 Web 登录页自动完成。老客户端如仍停在原账号，可断开后重新连接。Android 首页“所有设备”和设备名称可切换聊天范围，筛选会在本机记住。每条发送和收到的消息显示手机本地日期、时间；历史消息使用原始时间，流式更新不会刷新时间。
+
+协议及兼容范围见 [共享工作区](../docs/api/shared-workspace.md)。
+
+### Android App 更新分发
+
+Android 2.1.2 起可通过服务器静态更新清单发布同签名 APK，手机打开 App 即可收到更新提示。首次仍需手动安装一次支持更新清单的版本。配置和后续发布见 [Android 更新分发](ANDROID-UPDATES.md)，不需要重启聊天服务或改动数据库。

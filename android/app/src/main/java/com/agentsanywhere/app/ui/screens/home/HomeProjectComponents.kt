@@ -89,6 +89,7 @@ import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.SquarePen
 import com.composables.icons.lucide.X
 import kotlin.math.roundToInt
+import java.time.Instant
 
 internal data class HomeProjectActionMenu(
     val project: AgentProject,
@@ -100,6 +101,10 @@ internal data class HomeProjectActionMenu(
 @Composable
 internal fun HomeProjectList(
     projects: List<AgentProject>,
+    ungroupedSessions: List<AgentSession>,
+    ungroupedLoading: Boolean,
+    ungroupedError: Boolean,
+    onRetryUngrouped: () -> Unit,
     devices: List<AgentDevice>,
     agentRuntimes: List<String>,
     deviceAgentFilter: ProjectDeviceAgentFilter,
@@ -121,6 +126,7 @@ internal fun HomeProjectList(
     onSessionLongPress: (AgentSession, Rect) -> Unit,
     onOpenSession: (AgentSession) -> Unit,
 ) {
+    val activityNow by rememberProjectListClock()
     var pinnedExpanded by remember { mutableStateOf(true) }
     var filterAnchor by remember { mutableStateOf<Rect?>(null) }
     val projectsExpanded = projectPreferences.projectsExpanded
@@ -132,7 +138,7 @@ internal fun HomeProjectList(
     val agentLabel = deviceAgentFilter.runtime?.runtimeTypeLabel()
     val filtersActive = deviceAgentFilter.active || projectSessionStatus != ProjectSessionStatusFilter.Active
 
-    if (projects.isEmpty() && pinnedSessions.isEmpty()) {
+    if (projects.isEmpty() && pinnedSessions.isEmpty() && ungroupedSessions.isEmpty() && !ungroupedLoading && !ungroupedError) {
         Box(Modifier.fillMaxSize()) {
             AppEmptyState(
                 message = stringResource(
@@ -172,6 +178,7 @@ internal fun HomeProjectList(
                 items(pinnedProjects, key = { "pinned-project-${it.id}" }) { project ->
                     HomeProjectTreeItem(
                         project = project,
+                        now = activityNow,
                         agentLabel = agentLabel,
                         sessions = sessionsByProject[project.id].orEmpty(),
                         expanded = project.id in expandedProjectIds,
@@ -188,6 +195,7 @@ internal fun HomeProjectList(
                 items(pinnedSessions, key = { "pinned-session-${it.id}" }) { session ->
                     HomeProjectSessionRow(
                         session = session,
+                        now = activityNow,
                         inset = false,
                         onClick = { onOpenSession(session) },
                         onLongPress = { onSessionLongPress(session, it) },
@@ -208,7 +216,26 @@ internal fun HomeProjectList(
             )
         }
         if (projectsExpanded) {
-            if (regularProjects.isEmpty()) {
+            if (ungroupedSessions.isNotEmpty() || ungroupedLoading || ungroupedError) {
+                item("ungrouped-folder") {
+                    HomeUngroupedProjectRow(ungroupedSessions.size, projectPreferences.ungroupedExpanded, projectPreferences::toggleUngrouped)
+                }
+                if (projectPreferences.ungroupedExpanded) {
+                    if (ungroupedError) item("ungrouped-error") {
+                        Text(stringResource(R.string.home_project_load_retry), color = LocalAAColors.current.errorText, fontSize = 13.sp,
+                            modifier = Modifier.fillMaxWidth().clickable(onClick = onRetryUngrouped).padding(start = 34.dp, top = 10.dp, bottom = 10.dp))
+                    }
+                    if (ungroupedLoading) item("ungrouped-loading") {
+                        Box(Modifier.fillMaxWidth().height(40.dp).padding(start = 38.dp), contentAlignment = Alignment.CenterStart) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        }
+                    }
+                    items(ungroupedSessions, key = { "ungrouped-session-${it.id}" }) { session ->
+                        HomeProjectSessionRow(session, now = activityNow, onClick = { onOpenSession(session) }, onLongPress = { onSessionLongPress(session, it) })
+                    }
+                }
+            }
+            if (regularProjects.isEmpty() && ungroupedSessions.isEmpty() && !ungroupedLoading && !ungroupedError) {
                 item("projects-empty") {
                     HomeProjectEmptyText(stringResource(
                         if (deviceAgentFilter.active && loadingProjectIds.isNotEmpty()) R.string.home_project_filter_loading
@@ -220,6 +247,7 @@ internal fun HomeProjectList(
                 items(regularProjects, key = { "project-${it.id}" }) { project ->
                     HomeProjectTreeItem(
                         project = project,
+                        now = activityNow,
                         agentLabel = agentLabel,
                         sessions = sessionsByProject[project.id].orEmpty(),
                         expanded = project.id in expandedProjectIds,
@@ -253,8 +281,22 @@ internal fun HomeProjectList(
 }
 
 @Composable
+internal fun HomeUngroupedProjectRow(count: Int, expanded: Boolean, onClick: () -> Unit) {
+    val colors = LocalAAColors.current
+    Row(Modifier.fillMaxWidth().height(56.dp).clickable(onClick = onClick),
+        horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(if (expanded) Lucide.FolderOpen else Lucide.Folder, contentDescription = null, tint = colors.faint, modifier = Modifier.size(21.dp))
+        Text(stringResource(R.string.home_ungrouped), Modifier.weight(1f), color = colors.inkSoft, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(count.toString(), color = colors.faint, fontSize = 12.sp)
+        Icon(Lucide.ChevronDown, contentDescription = stringResource(if (expanded) R.string.session_notice_collapse else R.string.session_notice_expand),
+            tint = colors.faint, modifier = Modifier.padding(end = 10.dp).size(18.dp).rotate(if (expanded) 0f else -90f))
+    }
+}
+
+@Composable
 private fun HomeProjectTreeItem(
     project: AgentProject,
+    now: Instant,
     agentLabel: String?,
     sessions: List<AgentSession>,
     expanded: Boolean,
@@ -317,6 +359,7 @@ private fun HomeProjectTreeItem(
             else -> sessions.forEach { session ->
                 HomeProjectSessionRow(
                     session = session,
+                    now = now,
                     onClick = { onOpenSession(session) },
                     onLongPress = { onSessionLongPress(session, it) },
                 )

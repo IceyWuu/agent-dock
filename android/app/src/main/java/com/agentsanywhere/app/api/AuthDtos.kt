@@ -34,6 +34,7 @@ data class AuthConfigResponse(
     val setupTokenExpiresAt: String?,
     val serverTime: String,
     val emailVerificationRequired: Boolean = false,
+    val sharedWorkspaceEnabled: Boolean = false,
 )
 
 data class OAuthTokenResponse(
