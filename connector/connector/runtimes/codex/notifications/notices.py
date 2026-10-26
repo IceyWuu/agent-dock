@@ -11,6 +11,7 @@ from connector.runtimes.codex.domain import sessions as codex_sessions
 from connector.runtimes.codex.domain.approvals import approval_notice_from_request
 from connector.runtimes.codex.domain.input_requests import (
     codex_input_request,
+    is_input_request_context,
     user_input_notice,
 )
 from connector.runtimes.codex.domain.notices import CodexNoticeRegistry
@@ -98,9 +99,9 @@ class CodexNoticeHandler:
         turn_id = _first_string(params, "turnId", "turn_id") or self.active_turn_ids.get(
             session_id
         )
-        if turn_id is not None:
-            self.active_turn_ids[session_id] = turn_id
         is_blocking = params.get("isBlocking", True) is not False
+        if turn_id is not None and is_blocking:
+            self.active_turn_ids[session_id] = turn_id
         notice = user_input_notice(
             session_id=session_id,
             thread_id=thread_id,
@@ -134,6 +135,44 @@ class CodexNoticeHandler:
                 "notice_id": notice.notice_id,
                 **({"turn_id": turn_id} if turn_id else {}),
             },
+        )
+
+    async def handle_request_resolved(
+        self, session_id: str, thread_id: str, request_id: Any
+    ) -> None:
+        matched = False
+        for previous in self.notices.current_for_session(session_id):
+            source = previous.context.get("approvalSource", {})
+            identity = previous.context.get("requestId", source.get("requestId"))
+            if identity != request_id or request_id is None:
+                continue
+            notice = self.notices.transition(
+                previous.notice_id,
+                status="resolved",
+                response_required=False,
+                blocking=None,
+                actions=(),
+                context={
+                    "inputStatus"
+                    if is_input_request_context(previous.context)
+                    else "approvalStatus": "resolved"
+                },
+                metadata={"source": "codex.serverRequest/resolved"},
+            )
+            if notice is not None:
+                await self.host.notice_upsert(notice)
+                matched = True
+        if not matched:
+            return
+        await self.session_states.update(
+            session_id=session_id,
+            external_session_id=thread_id,
+            status="waiting_approval"
+            if self.notices.open_blocking_for_session(session_id)
+            else "running"
+            if session_id in self.active_turn_ids
+            else "idle",
+            metadata={"source": "codex.serverRequest/resolved"},
         )
 
     async def close_blocking_notices_for_terminal_turn(

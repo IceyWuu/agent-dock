@@ -15,6 +15,7 @@ import stat
 import struct
 import sys
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -26,6 +27,16 @@ from connector.runtime_protocol import RuntimeConflictError
 from connector.runtimes.codex.sdk.binary import (
     codex_launch_command,
     read_login_shell_path,
+)
+from connector.runtimes.codex.sdk.desktop_interactions import (
+    FOLLOWER_METHODS,
+    DesktopInteraction,
+    async_reply,
+    pending_interactions,
+)
+from connector.runtimes.codex.sdk.runtime_client import (
+    CodexStartTurnRequest,
+    CodexSteerTurnRequest,
 )
 
 MAX_FRAME = 32 * 1024 * 1024
@@ -129,6 +140,9 @@ class DesktopSessionBridge:
         self.ready: dict[str, asyncio.Event] = {}
         self.published: dict[str, tuple[str, dict]] = {}
         self.dirty: set[str] = set()
+        self.interactions: dict[str, dict[str, DesktopInteraction]] = {}
+        self.interaction_locks: dict[str, asyncio.Lock] = {}
+        self.answered_interactions: set[str] = set()
         self.owned = lambda _: False
         self.handler = None
         self.tasks: list[asyncio.Task] = []
@@ -152,6 +166,8 @@ class DesktopSessionBridge:
             self.writer.close()
         self.writer = None
         self.states.clear()
+        self.interactions.clear()
+        self.answered_interactions.clear()
 
     async def _connect(self) -> None:
         if self.writer and not self.writer.is_closing():
@@ -238,6 +254,9 @@ class DesktopSessionBridge:
             self.states.pop(oldest, None)
             self.published.pop(oldest, None)
             self.dirty.discard(oldest)
+            for key in self.interactions.pop(oldest, {}):
+                self.answered_interactions.discard(key)
+            self.interaction_locks.pop(oldest, None)
         self.following[thread_id] = time.monotonic()
         event = self.ready.setdefault(thread_id, asyncio.Event())
         if first and self.client_id and self.writer:
@@ -372,6 +391,7 @@ class DesktopSessionBridge:
             return
         turns = desktop_turns(current[2])
         if not turns:
+            await self._publish_interactions(thread_id, current)
             return
         previous = self.published.get(thread_id)
         if previous and previous[0] != turns[-1].get("id"):
@@ -385,6 +405,99 @@ class DesktopSessionBridge:
             }:
                 await self._publish_turn(thread_id, ended)
         await self._publish_turn(thread_id, turns[-1])
+        await self._publish_interactions(thread_id, current)
+
+    async def _publish_interactions(self, thread_id: str, current: tuple) -> None:
+        latest = pending_interactions(thread_id, current[0], current[2], desktop_turns(current[2]))
+        old = self.interactions.setdefault(thread_id, {})
+        for key in tuple(old):
+            if key not in latest:
+                await self.handler(
+                    {
+                        "method": "serverRequest/resolved",
+                        "params": {
+                            "threadId": thread_id,
+                            "requestId": key,
+                        },
+                    }
+                )
+                old.pop(key, None)
+                self.answered_interactions.discard(key)
+        for key, request in latest.items():
+            if old.get(key) != request and key not in self.answered_interactions:
+                await self.handler(request.event())
+                old[key] = request
+
+    async def respond(self, request_id: str, result: Mapping[str, Any]) -> None:
+        request = next(
+            (
+                items[request_id]
+                for items in self.interactions.values()
+                if request_id in items
+            ),
+            None,
+        )
+        if request is None:
+            raise RuntimeConflictError("此问题已失效，请刷新对话。")
+        lock = self.interaction_locks.setdefault(request.thread_id, asyncio.Lock())
+        async with lock:
+            state = await self.follow(request.thread_id, timeout=1)
+            current = self.states.get(request.thread_id)
+            latest = (
+                pending_interactions(
+                    request.thread_id, current[0], state, desktop_turns(state)
+                )
+                if state is not None and current
+                else {}
+            )
+            if (
+                latest.get(request_id) != request
+                or self.owned(request.thread_id)
+                or request_id in self.answered_interactions
+            ):
+                raise RuntimeConflictError(
+                    "此问题已在电脑端处理或发生变化，请刷新对话。"
+                )
+            payload = dict(result)
+            if request.asynchronous:
+                content = async_reply(request, payload)
+                turns = desktop_turns(state)
+                active = next(
+                    (
+                        turn
+                        for turn in reversed(turns)
+                        if turn.get("status") in {"inProgress", "running", "started"}
+                    ),
+                    None,
+                )
+                if active:
+                    await self.steer(
+                        CodexSteerTurnRequest(request.thread_id, active["id"], content)
+                    )
+                else:
+                    await self.queue(CodexStartTurnRequest(request.thread_id, content))
+            else:
+                field = (
+                    "decision"
+                    if request.method
+                    in {
+                        "item/commandExecution/requestApproval",
+                        "item/fileChange/requestApproval",
+                    }
+                    else "response"
+                )
+                await self.control(
+                    FOLLOWER_METHODS[request.method],
+                    {
+                        "conversationId": request.thread_id,
+                        "requestId": request.native_id,
+                        field: payload["decision"] if field == "decision" else payload,
+                    },
+                    version=1,
+                )
+            # Prevent a second submission while the owner's next snapshot arrives.
+            if request_id in self.interactions.get(request.thread_id, {}):
+                self.answered_interactions.add(request_id)
 
     async def _publish_turn(self, thread_id: str, turn: dict) -> None:
         turn_id = turn.get("id")

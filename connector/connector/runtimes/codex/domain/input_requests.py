@@ -151,7 +151,11 @@ def user_input_notice(
         response_required=True,
         actions=(
             request.form.action(),
-            {"actionId": "cancel", "label": "Cancel", "style": "secondary"},
+            *(
+                ({"actionId": "cancel", "label": "Cancel", "style": "secondary"},)
+                if not request.params.get("_desktopAsync")
+                else ()
+            ),
         ),
         source={
             "component": "codex.request_user_input",

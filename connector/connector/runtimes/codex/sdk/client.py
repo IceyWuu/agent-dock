@@ -864,6 +864,9 @@ class CodexSdkClient:
     ) -> None:
         response_payload = dict(result or {})
         request_key = str(request_id)
+        if request_key.startswith("desktop:") and self._desktop_bridge is not None:
+            await self._desktop_bridge.respond(request_key, response_payload)
+            return
         pending_request = self._pending_approval_responses.pop(request_key, None)
         if pending_request is not None:
             if not pending_request.response.done():

@@ -87,6 +87,10 @@ class CodexNoticeRegistry:
             if notice.status not in {"open", "responding"}:
                 continue
             is_questionnaire = is_input_request_context(notice.context)
+            if reason == "completed" and notice.context.get("requestParams", {}).get(
+                "_desktopAsync"
+            ):
+                continue
             if notice.blocking is None and not is_questionnaire:
                 continue
             next_notice = self.transition(

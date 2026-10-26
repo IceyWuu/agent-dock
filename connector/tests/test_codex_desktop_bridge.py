@@ -61,6 +61,7 @@ class Router:
         )
         self.revision = 1
         self.state = snapshot()
+        self.control_result = "success"
 
     async def __aenter__(self):
         self.server = await asyncio.start_unix_server(self.handle, str(self.path))
@@ -117,6 +118,10 @@ class Router:
                             "conversationState": self.state,
                         }
                     )
+                elif request["method"].startswith("thread-follower-"):
+                    await self.send({"type": "response", "requestId": request["requestId"],
+                                     "resultType": self.control_result,
+                                     "result": {"ok": True}})
         except (asyncio.IncompleteReadError, ConnectionError):
             pass
         finally:
@@ -518,3 +523,339 @@ def test_real_native_queue_accepts_isolated_session_without_model_call(tmp_path)
     )
     assert result.returncode == 0, result.stderr
     assert thread_id in result.stdout and "Queued message" in result.stdout
+
+
+def question_request():
+    return {
+        "id": 42,
+        "method": "item/tool/requestUserInput",
+        "params": {
+            "threadId": "thread_existing",
+            "turnId": "t",
+            "itemId": "q",
+            "questions": [
+                {
+                    "id": "language",
+                    "question": "Choose a language",
+                    "isOther": True,
+                    "options": [
+                        {"label": "Python", "description": "Simple"},
+                        {"label": "Rust"},
+                    ],
+                }
+            ],
+        },
+    }
+
+
+@pytest.mark.parametrize("custom", [False, True])
+def test_desktop_question_round_trip_and_computer_answer_resolution(tmp_path, custom):
+    async def run():
+        async with Router(tmp_path) as router:
+            router.state["requests"] = [question_request()]
+            bridge = DesktopSessionBridge({})
+            bridge.endpoint = str(router.path)
+            native = _FakeLowLevelAsyncCodex()
+            client = CodexSdkClient(
+                native, sdk=_FakeLowLevelSdkModule(), desktop_bridge=bridge
+            )
+            host = FakeHost()
+            runtime = CodexRuntime(
+                RuntimeConfig(runtime="codex", revision=1, values={}), host, client
+            )
+            await runtime.start()
+            try:
+                await eventually(lambda: bridge.client_id is not None)
+                await bridge.follow("thread_existing")
+                await eventually(
+                    lambda: any(
+                        n.interaction_type == "input_request"
+                        for n in host.notice_upserts
+                    )
+                )
+                notice = next(
+                    n
+                    for n in host.notice_upserts
+                    if n.interaction_type == "input_request"
+                )
+                assert notice.actions[0]["input"]["uiSchema"]["questions"][0][
+                    "allowCustom"
+                ]
+                answer = {"customText": "Go"} if custom else {"optionIds": ["o_1"]}
+                responded = await runtime.respond_interaction(
+                    notice.session_id,
+                    notice.notice_id,
+                    "submit",
+                    {
+                        "requestId": notice.context["requestId"],
+                        "answers": {"language": answer},
+                    },
+                )
+                assert responded.ok
+                delivered = next(
+                    m
+                    for m in router.messages
+                    if m["method"] == "thread-follower-submit-user-input"
+                )
+                assert delivered["params"] == {
+                    "conversationId": "thread_existing",
+                    "requestId": 42,
+                    "response": {
+                        "answers": {
+                            "language": {"answers": ["Go" if custom else "Rust"]}
+                        }
+                    },
+                }
+                assert (
+                    delivered["targetClientId"] == "owner" and delivered["version"] == 1
+                )
+                with pytest.raises(RuntimeConflictError):
+                    await client.respond(notice.context["requestId"], {})
+                # An unchanged state cannot reopen the accepted question.
+                await bridge._publish("thread_existing")
+                assert host.notice_upserts[-1].status == "resolved"
+                # A second request answered on the computer closes on the phone.
+                second = question_request()
+                second["id"] = 43
+                await router.patch(
+                    [{"op": "replace", "path": ["requests"], "value": [second]}]
+                )
+                await eventually(
+                    lambda: any(
+                        n.status == "open" and n.notice_id != notice.notice_id
+                        for n in host.notice_upserts
+                    )
+                )
+                await router.patch(
+                    [{"op": "replace", "path": ["requests"], "value": []}]
+                )
+                await eventually(lambda: host.notice_upserts[-1].status == "resolved")
+                assert native.low_level.thread_resume_params == []
+            finally:
+                await runtime.stop()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "method,follower,payload",
+    [
+        (
+            "item/commandExecution/requestApproval",
+            "thread-follower-command-approval-decision",
+            {"decision": "accept"},
+        ),
+        (
+            "item/fileChange/requestApproval",
+            "thread-follower-file-approval-decision",
+            {"decision": "decline"},
+        ),
+        (
+            "item/permissions/requestApproval",
+            "thread-follower-permissions-request-approval-response",
+            {"permissions": {}, "scope": "turn"},
+        ),
+    ],
+)
+def test_desktop_approvals_use_owner_and_rejections_remain_retryable(
+    tmp_path, method, follower, payload
+):
+    async def run():
+        async with Router(tmp_path) as router:
+            request = question_request()
+            request["method"] = method
+            router.state["requests"] = [request]
+            bridge = DesktopSessionBridge({})
+            bridge.endpoint = str(router.path)
+
+            async def handler(_):
+                pass
+
+            await bridge.start(handler, lambda _: False)
+            try:
+                await eventually(lambda: bridge.client_id is not None)
+                await bridge.follow("thread_existing")
+                await eventually(
+                    lambda: bool(bridge.interactions.get("thread_existing"))
+                )
+                key = next(iter(bridge.interactions["thread_existing"]))
+                router.control_result = "error"
+                with pytest.raises(RuntimeConflictError):
+                    await bridge.respond(key, payload)
+                assert key not in bridge.answered_interactions
+                router.control_result = "success"
+                await bridge.respond(key, payload)
+                delivered = [m for m in router.messages if m["method"] == follower][-1]
+                field = "decision" if "decision" in payload else "response"
+                assert delivered["params"][field] == (
+                    payload["decision"] if field == "decision" else payload
+                )
+                assert delivered["params"]["requestId"] == 42
+            finally:
+                await bridge.stop()
+
+    asyncio.run(run())
+
+
+def test_async_questions_use_desktop_envelope_and_expire_after_computer_answer():
+    from connector.runtimes.codex.sdk.desktop_interactions import pending_interactions
+
+    async def run():
+        bridge = DesktopSessionBridge({})
+        state = snapshot()
+        turn = desktop_turns(state)[0]
+        turn["items"][1]["questions"] = [
+            {"title": "Which plan?", "options": ["A", "B"]},
+            {"title": "Any notes?"},
+        ]
+        bridge.states["thread_existing"] = "owner", 1, state
+        events, deliveries = [], []
+
+        async def handler(event):
+            events.append(event)
+
+        async def steer(request):
+            deliveries.append(request)
+
+        bridge.handler = handler
+        bridge.steer = steer
+        await bridge._publish("thread_existing")
+        questions = [e for e in events if e["method"] == "item/tool/requestUserInput"]
+        assert len(questions) == 2 and all(
+            not e["params"]["isBlocking"] for e in questions
+        )
+        assert all(
+            "itemId" not in e["params"] for e in questions
+        )  # Standalone phone cards, including multiple questions.
+        first = questions[0]
+        qid = first["params"]["questions"][0]["id"]
+        await bridge.respond(
+            first["id"], {"answers": {qid: {"answers": ["Custom plan"]}}}
+        )
+        text = deliveries[0].content
+        replies = json.loads(text.split("\n")[1])
+        assert replies == [
+            {
+                "questionItemId": '["request_user_input_async","a",0]',
+                "question": "Which plan?",
+                "answer": "Custom plan",
+            }
+        ]
+        turn["items"].append(
+            {
+                "id": "reply",
+                "type": "steeringUserMessage",
+                "status": "accepted",
+                "input": [{"type": "text", "text": text}],
+            }
+        )
+        remaining = pending_interactions(
+            "thread_existing", "owner", state, desktop_turns(state)
+        )
+        assert len(remaining) == 1
+        await bridge._publish("thread_existing")
+        assert any(
+            e["method"] == "serverRequest/resolved"
+            and e["params"]["requestId"] == first["id"]
+            for e in events
+        )
+        with pytest.raises(RuntimeConflictError):
+            await bridge.respond(first["id"], {})
+
+    asyncio.run(run())
+
+
+def test_desktop_response_rejects_changed_owner_and_missing_snapshot():
+    async def run():
+        bridge = DesktopSessionBridge({})
+        state = snapshot()
+        state["requests"] = [question_request()]
+        bridge.states["thread_existing"] = "owner", 1, state
+
+        async def handler(_):
+            pass
+
+        bridge.handler = handler
+        await bridge._publish("thread_existing")
+        key = next(iter(bridge.interactions["thread_existing"]))
+        bridge.states["thread_existing"] = "different-owner", 1, state
+        with pytest.raises(RuntimeConflictError):
+            await bridge.respond(key, {})
+        bridge.states.clear()
+        with pytest.raises(RuntimeConflictError):
+            await bridge.respond(key, {})
+
+    asyncio.run(run())
+
+
+def test_completed_async_question_remains_answerable_and_queues_in_original_thread():
+    async def run():
+        bridge = DesktopSessionBridge({})
+        native = _FakeLowLevelAsyncCodex()
+        client = CodexSdkClient(
+            native, sdk=_FakeLowLevelSdkModule(), desktop_bridge=bridge
+        )
+        host = FakeHost()
+        runtime = CodexRuntime(
+            RuntimeConfig(runtime="codex", revision=1, values={}), host, client
+        )
+        await runtime.start()
+        try:
+            state = snapshot()
+            turn = desktop_turns(state)[0]
+            turn["items"][1]["questions"] = [{"title": "Any notes?"}]
+            bridge.states["thread_existing"] = "owner", 1, state
+            await bridge._publish("thread_existing")
+            notice = next(
+                n for n in host.notice_upserts if n.interaction_type == "input_request"
+            )
+            turn["status"] = "completed"
+            # desktop_turns returns shallow copies; update the actual entity status.
+            state["turnHistory"]["history"]["entitiesByKey"]["t"]["status"] = (
+                "completed"
+            )
+            await bridge._publish("thread_existing")
+            assert not any(
+                n.notice_id == notice.notice_id and n.status == "closed"
+                for n in host.notice_upserts
+            )
+            assert len(notice.actions) == 1
+            deliveries = []
+
+            async def queue(request):
+                deliveries.append(request)
+
+            bridge.queue = queue
+            qid = notice.context["requestParams"]["questions"][0]["id"]
+            result = await runtime.respond_interaction(
+                notice.session_id,
+                notice.notice_id,
+                "submit",
+                {
+                    "requestId": notice.context["requestId"],
+                    "answers": {qid: {"customText": "Later answer"}},
+                },
+            )
+            assert result.ok and len(deliveries) == 1
+            assert deliveries[0].thread_id == "thread_existing"
+            assert "Later answer" in deliveries[0].content
+            assert host.state_updates[-1]["status"] == "idle"
+        finally:
+            await runtime.stop()
+
+    asyncio.run(run())
+
+
+def test_private_or_foreign_questions_are_not_published_as_ordinary_forms():
+    from connector.runtimes.codex.sdk.desktop_interactions import pending_interactions
+
+    state = snapshot()
+    secret = question_request()
+    secret["params"]["questions"][0]["isSecret"] = True
+    foreign = question_request()
+    foreign["params"]["threadId"] = "other-thread"
+    state["requests"] = [secret, foreign]
+    assert (
+        pending_interactions("thread_existing", "owner", state, desktop_turns(state))
+        == {}
+    )

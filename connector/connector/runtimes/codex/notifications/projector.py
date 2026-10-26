@@ -126,6 +126,11 @@ class CodexNotificationProjector:
                 metadata={"source": f"codex.{event.event_type}"},
             )
             return
+        if event.event_type == "serverRequest/resolved":
+            await self.notice_handler.handle_request_resolved(
+                session_id, thread_id, event.params.get("requestId")
+            )
+            return
         if is_user_input_request(event.event_type):
             await self.notice_handler.handle_user_input_request(
                 session_id=session_id,

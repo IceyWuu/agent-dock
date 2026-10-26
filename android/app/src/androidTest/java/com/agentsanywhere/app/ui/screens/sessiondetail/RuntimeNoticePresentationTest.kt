@@ -165,6 +165,56 @@ class RuntimeNoticePresentationTest {
             } finally { executor.shutdownNow() }
         }
     }
+    /** Opt-in: uses the Connector's real projection and desktop IPC response route. */
+    private fun desktopRoundTrip(custom: Boolean = false, asynchronous: Boolean = false) {
+        org.junit.Assume.assumeTrue(InstrumentationRegistry.getArguments().getString("desktopQuestionFixture") == "true")
+        val origin = "http://127.0.0.1:18867"
+        fun fixture(path: String): JSONObject = java.net.URL(origin + path).openConnection().apply {
+            connectTimeout = 15000; readTimeout = 15000
+        }.getInputStream().use { JSONObject(it.bufferedReader().readText()) }
+        fixture("/fixture/reset?mode=" + if (asynchronous) "async" else "native")
+        val api = SessionsApi()
+        val notices = mergeRuntimeNotices(emptyList(), api.getSessionRuntimeNotices(origin, "fixture", "fixture").notices, true)
+        val notice = notices.single { it.interactionType == "input_request" }
+        val controller = SessionDetailController(api, object: AuthSessionReader {
+            override fun readServerUrl() = origin
+            override fun readAccessToken() = "fixture"
+        })
+        val submitted = CompletableFuture<Unit>()
+        content(listOf(notice)) { n,a,i ->
+            controller.respondNotice(n.sessionId, n.noticeId, a.actionId, i).fold(
+                { submitted.complete(Unit) }, { submitted.completeExceptionally(it) })
+        }
+        compose.onNodeWithText("Choose a language").assertIsDisplayed()
+        if (custom) compose.onNode(hasSetTextAction()).performScrollTo().performTextReplacement("Go from phone")
+        else compose.onNodeWithText("Rust").performScrollTo().performClick()
+        capture(if (asynchronous) "desktop-async" else if (custom) "desktop-custom" else "desktop-choice")
+        compose.onNodeWithText(text(R.string.session_input_request_submit)).assertIsDisplayed().performClick()
+        submitted.get(20, TimeUnit.SECONDS)
+        val delivered = fixture("/fixture/delivery").getJSONArray("messages")
+        assertEquals(1, delivered.length())
+        val message = delivered.getJSONObject(0)
+        assertEquals("owner", message.getString("targetClientId"))
+        val params = message.getJSONObject("params")
+        assertEquals("thread_existing", params.getString("conversationId"))
+        if (asynchronous) {
+            assertEquals("thread-follower-steer-turn", message.getString("method"))
+            val reply = params.getJSONArray("input").getJSONObject(0).getString("text")
+            assertTrue(reply.startsWith("<send_user_message_question_reply>"))
+            assertEquals("Go from phone", org.json.JSONArray(reply.substringAfter("<send_user_message_question_reply>").substringBefore("</send_user_message_question_reply>").trim()).getJSONObject(0).getString("answer"))
+        } else {
+            assertEquals("thread-follower-submit-user-input", message.getString("method"))
+            assertEquals(42, params.getInt("requestId"))
+            val answers = params.getJSONObject("response").getJSONObject("answers").getJSONObject("language").getJSONArray("answers")
+            assertEquals(if (custom) "Go from phone" else "Rust", answers.getString(0))
+        }
+        val refreshed = api.getSessionRuntimeNotices(origin, "fixture", "fixture").notices.single { it.noticeId == notice.noticeId }
+        assertEquals("resolved", refreshed.status)
+        assertFalse(refreshed.responseRequired)
+    }
+    @Test fun desktopChoiceReachesOriginalOwner() = desktopRoundTrip()
+    @Test fun desktopCustomTextReachesOriginalOwner() = desktopRoundTrip(custom = true)
+    @Test fun desktopAsyncAnswerReachesOriginalOwner() = desktopRoundTrip(custom = true, asynchronous = true)
     @Test fun singleChoiceReplacesPreviousChoiceAndPosts() = submitToLocalServer()
     @Test fun multipleChoicesPostBothIds() = submitToLocalServer(multiple = true)
     @Test fun customAnswerPostsText() = submitToLocalServer(custom = true)
