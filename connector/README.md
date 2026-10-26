@@ -137,8 +137,7 @@ atomic file transactions and legacy migration.
 
 The default providers are Codex, Claude and DSH. The connector reports attached runtime
 capabilities to the server. Codex is discovered through the official
-`openai-codex` SDK package; the connector does not use a Codex CLI/app-server
-path or IPC switch as an active runtime surface. If Claude Code is not on
+`openai-codex` SDK package. Connector 2.1.2 also follows an existing local Codex desktop/IDE owner through a version-checked desktop bridge: queued messages use the installed `codex queue` command, and live desktop snapshots/patches are translated into the existing runtime timeline events. SDK-owned conversations keep their normal SDK streams and release their writer after a terminal event when supported. The bridge never deletes locks or stops Codex. An absent or incompatible desktop keeps SDK sessions available; external-owner sends fail explicitly rather than claiming delivery. SDK-owned sessions retain their configured model gateway. Forwarded messages inherit the owning client's model and permissions. Configuration steps: [Codex 手机同步](../docs/setup/codex-mobile-sync.md). If Claude Code is not on
 `PATH`, set:
 
 ```bash

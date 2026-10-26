@@ -231,6 +231,10 @@ def test_active_codex_code_does_not_import_app_server_reference() -> None:
     for path in (CONNECTOR_PACKAGE / "runtimes" / "codex").rglob("*.py"):
         source = path.read_text(encoding="utf-8")
         for token in FORBIDDEN_ACTIVE_CODEX_TOKENS:
+            # Explicit desktop-following product support lives in one transport
+            # module. Keep the historical adapters and all other IPC use banned.
+            if path.name == "desktop_bridge.py" and token in {"thread-follower-start-turn", "thread-follower-interrupt-turn"}:
+                continue
             if token in source:
                 relative_path = path.relative_to(CONNECTOR_PACKAGE.parent)
                 violations.append(f"{relative_path}: references {token}")

@@ -2,18 +2,7 @@
 
 ## Status and source
 
-Deprecated historical reference only. The active Connector v2 Codex runtime is
-SDK-only and must not implement or extend hand-written IPC or app-server JSON-RPC
-as an active path. This document describes an internal Codex IPC contract
-recovered from the installed Codex IDE extension version `26.721.41059`. It is
-not a documented OpenAI public API.
-
-The corresponding models live in
-`connector/connector/_reference/codex/ipc_protocol.py`.
-
-Do not use the implementation sections below as a current plan. They document
-the abandoned hand-written IPC/app-server approach. Current Codex work must use
-the official SDK through `CodexRuntimeClient`.
+Historical reference only. Connector 2.1.2 uses the official SDK plus an optional desktop follower in `runtimes/codex/sdk/desktop_bridge.py` for cross-device input and live output. The historical implementations and plan below remain inactive and must not be imported. The follower detects the installed client, validates the stream version, and converts live replacements into the existing runtime timeline. See [current configuration steps](../setup/codex-mobile-sync.md).
 
 ## Transport and router
 

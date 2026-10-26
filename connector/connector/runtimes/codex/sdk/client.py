@@ -25,6 +25,7 @@ from openai_codex.generated.v2_all import (
     ThreadResumeParams,
     ThreadSortKey,
     ThreadStartParams,
+    ThreadUnsubscribeResponse,
     TurnStartParams,
     UserInput,
     WorkspaceWriteSandboxPolicy,
@@ -49,6 +50,7 @@ from connector.runtimes.codex.sdk.command_notifications import (
     LowLevelTurnHandle,
     turn_identity,
 )
+from connector.runtimes.codex.sdk.desktop_bridge import DesktopSessionBridge
 from connector.runtimes.codex.sdk.events import CodexSdkEvent
 from connector.runtimes.codex.sdk.model_gateway import (
     CODEX_MODEL_GATEWAY_PROVIDER_ID,
@@ -147,11 +149,14 @@ class CodexSdkClient:
         sdk: Any | None = None,
         model_gateway: ModelGateway | None = None,
         client_factory: Callable[[], Any] | None = None,
+        desktop_bridge: DesktopSessionBridge | None = None,
     ) -> None:
         self._client = client
         self._sdk = sdk
         self._model_gateway = model_gateway
         self._client_factory = client_factory
+        self._desktop_bridge = desktop_bridge
+        self._desktop_discovery_task: asyncio.Task[None] | None = None
         self._recovery_lock = asyncio.Lock()
         self._started = False
         self._handler: NotificationHandler | None = None
@@ -169,16 +174,31 @@ class CodexSdkClient:
         self._command_notifications = CommandNotifications.for_client(client)
         self._generation = 0
         self._resume_locks: dict[str, asyncio.Lock] = {}
+        self._turn_start_locks: dict[str, asyncio.Lock] = {}
         self._announced_turns: set[tuple[str, str]] = set()
         self._stopping = False
 
     async def start(self, handler: NotificationHandler) -> None:
         self._stopping = False
         self._handler = handler
+        if self._desktop_bridge is not None:
+            await self._desktop_bridge.start(handler, lambda thread_id: thread_id in self._loaded_thread_ids)
         self._loop = asyncio.get_running_loop()
         await self.start_native_client(self._client)
         self._started = True
         self.start_global_notification_task()
+        if self._desktop_bridge is not None:
+            self._desktop_discovery_task = asyncio.create_task(self._follow_desktop_threads())
+
+    async def _follow_desktop_threads(self) -> None:
+        # Discover recent desktop sessions independently of the much slower
+        # complete-history scanner and its network uploads.
+        while True:
+            try:
+                await self.list_threads(limit=100)
+            except Exception as exc:  # noqa: BLE001 — discovery must not terminate SDK operations
+                logger.debug("codex desktop discovery deferred error_type={}", type(exc).__name__)
+            await asyncio.sleep(5)
 
     async def start_native_client(self, client: Any) -> None:
         # Command notifications are routed through the SDK router of this
@@ -198,6 +218,12 @@ class CodexSdkClient:
 
     async def stop(self) -> None:
         self._started = False
+        if self._desktop_discovery_task is not None:
+            self._desktop_discovery_task.cancel()
+            await asyncio.gather(self._desktop_discovery_task, return_exceptions=True)
+            self._desktop_discovery_task = None
+        if self._desktop_bridge is not None:
+            await self._desktop_bridge.stop()
         await self.finish_terminal_streams()
         # Nothing may reach the runtime once shutdown starts closing the
         # transport; streams woken by the close must not emit synthetic failures.
@@ -427,7 +453,13 @@ class CodexSdkClient:
             return await thread_list(**params)
 
         result = await self.call_read_with_recovery("thread/list", read_threads)
-        return thread_list_result(result)
+        listed = thread_list_result(result)
+        if self._desktop_bridge is not None:
+            # Register followers together: never wait half a second per inactive
+            # historical thread before reaching the conversation on the phone.
+            await asyncio.gather(*(self._desktop_bridge.follow(str(thread["id"]), timeout=0)
+                                   for thread in listed.threads if thread.get("id") and thread["id"] not in self._loaded_thread_ids))
+        return listed
 
     async def read_thread(
         self,
@@ -452,6 +484,11 @@ class CodexSdkClient:
             return thread_read_result(result)
 
         projected = await self.call_read_with_recovery("thread/read", read)
+        if self._desktop_bridge is not None and thread_id not in self._loaded_thread_ids:
+            await self._desktop_bridge.follow(thread_id)
+            if include_turns and isinstance(projected.thread, Mapping):
+                projected = CodexThreadReadResult(thread={**projected.thread, "turns": self._desktop_bridge.overlay(
+                    thread_id, list(projected.thread.get("turns", [])))})
         elapsed_ms = (time.monotonic() - started_at) * 1000
         if include_turns or elapsed_ms >= 250:
             logger.info(
@@ -517,7 +554,11 @@ class CodexSdkClient:
             "thread/turns/list",
             read_page,
         )
-        return CodexThreadTurnsPage(turns=tuple(page.data), next_cursor=page.next_cursor)
+        turns = list(page.data)
+        if self._desktop_bridge is not None and thread_id not in self._loaded_thread_ids:
+            await self._desktop_bridge.follow(thread_id)
+            turns = list(reversed(self._desktop_bridge.overlay(thread_id, list(reversed(turns)), include_new=cursor is None)))
+        return CodexThreadTurnsPage(turns=tuple(turns), next_cursor=page.next_cursor)
 
     async def start_thread(self, request: CodexStartThreadRequest) -> CodexThreadResult:
         await ensure_codex_initialized(self._client)
@@ -568,10 +609,26 @@ class CodexSdkClient:
         return CodexThreadResult(thread_id=thread_id, payload=payload)
 
     async def start_turn(self, request: CodexStartTurnRequest) -> CodexTurnResult:
+        lock = self._turn_start_locks.setdefault(request.thread_id, asyncio.Lock())
+        async with lock:
+            return await self._start_turn(request)
+
+    async def _start_turn(self, request: CodexStartTurnRequest) -> CodexTurnResult:
         await ensure_codex_initialized(self._client)
         low_level_client = codex_low_level_client(self._client)
         if low_level_client is not None:
-            await self.ensure_thread_resumed_for_turn(low_level_client, request)
+            if self._desktop_bridge is not None and request.thread_id not in self._loaded_thread_ids:
+                state = await self._desktop_bridge.follow(request.thread_id, timeout=1)
+                if state is not None:
+                    await self._desktop_bridge.queue(request)
+                    return CodexTurnResult(turn_id=None, payload={"queued": True, "delivery": "desktop", "usesOwnerSettings": True})
+            try:
+                await self.ensure_thread_resumed_for_turn(low_level_client, request)
+            except RuntimeConflictError:
+                if self._desktop_bridge is None or await self._desktop_bridge.follow(request.thread_id, timeout=2) is None:
+                    raise
+                await self._desktop_bridge.queue(request)
+                return CodexTurnResult(turn_id=None, payload={"queued": True, "delivery": "desktop", "usesOwnerSettings": True})
             # Recovery may swap the router mid-call; finish on the one we began.
             notifications = self._command_notifications
             if notifications:
@@ -636,6 +693,9 @@ class CodexSdkClient:
         return CodexTurnResult(turn_id=id_of(turn), payload=payload)
 
     async def steer_turn(self, request: CodexSteerTurnRequest) -> CodexTurnResult:
+        if self._desktop_bridge is not None and request.thread_id not in self._loaded_thread_ids:
+            await self._desktop_bridge.steer(request)
+            return CodexTurnResult(turn_id=request.turn_id, payload={"id": request.turn_id})
         turn = self._turn_handle(
             thread_id=request.thread_id,
             turn_id=request.turn_id,
@@ -648,6 +708,9 @@ class CodexSdkClient:
         self,
         request: CodexInterruptTurnRequest,
     ) -> CodexTurnResult:
+        if self._desktop_bridge is not None and request.thread_id not in self._loaded_thread_ids:
+            await self._desktop_bridge.interrupt(request)
+            return CodexTurnResult(turn_id=request.turn_id, payload={"id": request.turn_id})
         turn = self._turn_handle(
             thread_id=request.thread_id,
             turn_id=request.turn_id,
@@ -1109,6 +1172,30 @@ class CodexSdkClient:
                     self._turns.pop(turn_id, None)
                 if self._turns.get(thread_id) is turn:
                     self._turns.pop(thread_id, None)
+                if completed_seen and self._desktop_bridge is not None:
+                    await self._release_idle_thread(thread_id)
+
+    async def _release_idle_thread(self, thread_id: str) -> None:
+        """Give desktop/IDE clients the writer after our terminal is delivered."""
+        lock = self._turn_start_locks.setdefault(thread_id, asyncio.Lock())
+        async with lock:
+            if self._stopping or thread_id not in self._loaded_thread_ids:
+                return
+            if any(thread == thread_id for thread, _ in self._announced_turns):
+                return
+            if thread_id in self._turns or any(s.thread_id == thread_id for s in self._stream_states.values()):
+                return
+            low = codex_low_level_client(self._client)
+            request = getattr(low, "request", None)
+            if not callable(request):
+                return
+            try:
+                await request("thread/unsubscribe", {"threadId": thread_id}, response_model=ThreadUnsubscribeResponse)
+            except Exception as exc:  # noqa: BLE001 — older SDKs retain the original ownership behaviour
+                logger.debug("codex idle release unavailable error_type={}", type(exc).__name__)
+                return
+            self._loaded_thread_ids.discard(thread_id)
+            self._threads.pop(thread_id, None)
 
     def _start_terminal_delivery(
         self, stream: TurnStreamState, message: CodexNotificationMessage
@@ -1188,6 +1275,7 @@ def sdk_client_from_config(config: RuntimeConfig) -> CodexRuntimeClient:
         sdk=sdk,
         model_gateway=model_gateway,
         client_factory=create_client,
+        desktop_bridge=DesktopSessionBridge(dict(config.values)),
     )
 
 

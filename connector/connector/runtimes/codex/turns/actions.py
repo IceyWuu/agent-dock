@@ -164,6 +164,19 @@ class CodexTurnActions:
             raise
         turn_id = result.turn_id
         current_state = self.session_states.get(session_id)
+        if result.payload.get("queued") is True:
+            # The desktop owns the real turn and emits its own start/completion.
+            # Queue acceptance must not invent a running turn or overwrite one
+            # already observed while the queue command was returning.
+            if current_state is None or current_state.status in {"waiting", "error", "idle"}:
+                await self._set_session_state(
+                    session_id=session_id, external_session_id=external_session_id,
+                    status="waiting", metadata={"source": "codex.desktop.queued"},
+                )
+            return RuntimeOperationResult(ok=True, result={
+                "turnId": None, "turn": dict(result.payload),
+                "externalSessionId": external_session_id, "queued": True,
+            })
         if turn_completed_before_start_returned(current_state):
             return RuntimeOperationResult(
                 ok=True,
