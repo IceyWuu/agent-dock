@@ -291,6 +291,12 @@ fun HomeScreen(
             projectActionMenu?.let { menu ->
                 HomeProjectActionOverlay(
                     menu = menu,
+                    onOpenFiles = {
+                        projectPreferences.selectDevice(menu.project.connectorId)
+                        projectPreferences.selectFileProject(menu.project.id)
+                        projectActionMenu = null
+                        navigate(AppDestination.Files)
+                    },
                     onDismiss = { projectActionMenu = null },
                     onEdit = {
                         projectActionMenu = null

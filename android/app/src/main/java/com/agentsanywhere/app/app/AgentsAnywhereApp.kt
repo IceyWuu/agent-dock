@@ -159,6 +159,7 @@ fun AgentsAnywhereApp(
         FilesController(
             filesApi = FilesApi(apiClient),
             sessionStore = sessionStore,
+            cacheDirectory = context.cacheDir,
         )
     }
     val terminalController = remember(context, sessionStore, apiClient) {

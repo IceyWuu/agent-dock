@@ -5,10 +5,12 @@ import com.agentsanywhere.app.api.FilesApi
 import com.agentsanywhere.app.feature.auth.AuthSessionStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.ensureActive
 
 class FilesController(
     private val filesApi: FilesApi,
     private val sessionStore: AuthSessionStore,
+    private val cacheDirectory: java.io.File,
 ) {
     suspend fun listFiles(
         connectorId: String,
@@ -77,6 +79,26 @@ class FilesController(
             }
         }
     }
+
+    suspend fun readDocument(connectorId: String, root: String, path: String): Result<WorkspaceDocument> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val auth = authSession()
+                val identity = documentIdentity(auth.serverUrl, sessionStore.readUserId(), connectorId, resolveWorkspaceLink("${root.trimEnd('/')}/__document__", path))
+                val directory = java.io.File(cacheDirectory, "workspace-documents").apply { mkdirs() }
+                val temporary = java.io.File.createTempFile("document-", ".part", directory)
+                try {
+                    kotlinx.coroutines.runInterruptible {
+                        filesApi.downloadFile(auth.serverUrl, auth.accessToken, connectorId, root, path, temporary)
+                    }
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    val target = java.io.File(directory, "$identity.document")
+                    check(temporary.renameTo(target)) { "Could not cache document." }
+                    WorkspaceDocumentCache.prune(directory, target)
+                    WorkspaceDocument(identity, path.replace('\\', '/').substringAfterLast('/'), target)
+                } finally { temporary.delete() }
+            }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+        }
 
     private fun authSession(): ApiAuth {
         val serverUrl = sessionStore.readServerUrl()

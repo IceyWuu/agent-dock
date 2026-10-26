@@ -323,6 +323,8 @@ internal fun AgentsAnywhereNavHost(
                     state = sessionsState,
                     controller = filesController,
                     onPairDevice = { navigate(AppDestination.DeviceSetup) },
+                    serverUrl = serverUrl,
+                    userId = userId,
                 )
                 AppDestination.DeviceSetup -> androidx.compose.runtime.key(serverUrl, userId) {
                     AddDeviceScreen(

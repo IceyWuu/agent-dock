@@ -99,7 +99,7 @@ composition test also reads persisted sessions through the real Python adapter.
 
 ## Event subscription (additive 1.x)
 
-The handshake advertises `features.syncMode = events` and `projectionVersion = 3`.
+The handshake advertises `features.syncMode = events` and `projectionVersion = 4`.
 `runtime.sync.subscribe` replaces this connection's previous subscription and returns
 `streamId` plus the projection version. Connector accepts v2 and v3, and each batch must match the subscribed version. v3 reads rc.7 tool-role results and PTC sub-dispatches; a v2 checkpoint triggers a complete recalibration so previously omitted results are restored. Update Connector together with the v3 Host. `runtime.sync.batch` notifications follow
 `sync-batch.schema.json`, with monotonic `batchSeq`. The Connector acknowledges each
@@ -135,7 +135,7 @@ Connector state, which uses the existing periodic and shutdown flush. A crash
 before that flush permits retransmission, never skipping uncommitted history.
 `checkpoint.delete {externalSessionId}` invalidates an unavailable session.
 
-Checkpoint fields are `version:1`, `projectionVersion:3`, `throughSeq`,
+Checkpoint fields are `version:1`, `projectionVersion:4`, `throughSeq`,
 `historyHash` (SHA-256 of durable native events and attachment receipts, seeded
 with native/platform identity), and `settled`. The Host locally replays history
 and compares this fingerprint, independent of live/persisted SDK revision formats.
@@ -200,3 +200,17 @@ the adapter forwards that fact through existing ingestion before returning state
 Sends recheck availability and return
 `{ok:false,code:"session_archived",result:{sourceState,...}}` for archived sessions.
 No server logic, tables, migrations, or additional AA unarchive protection are added.
+
+## Presented workspace files (additive projection)
+
+Native `deliverables/presented` events project each validated declaration to an
+existing Timeline `type: artifact`, with `content: {kind: "file", path,
+description?}`. The recorded Session filesystem path is retained; no binary file
+bytes are inserted into the event or RPC frame. Clients open the path using the
+session's connector and workspace through the existing authenticated filesystem
+read/download APIs. Files still require the source device to be online. Cold
+replay and incremental events produce the same stable artifact IDs. Invalid or
+empty declarations are ignored. Projection version 4 rebuilds existing v3
+checkpoints so historical deliveries are no longer omitted; no wire schema or
+required API fields change. This does not add cross-device support for every DSH
+custom UI component or image attachment block.

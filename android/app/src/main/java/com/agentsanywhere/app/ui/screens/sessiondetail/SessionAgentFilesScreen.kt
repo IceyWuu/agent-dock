@@ -7,6 +7,9 @@ import android.view.MotionEvent
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
@@ -131,199 +134,45 @@ internal fun SessionAgentFilesScreen(
     onOpenFileRequestConsumed: (String) -> Unit = {},
     onTerminalVerticalDragChange: (Boolean) -> Unit = {},
     onBack: () -> Unit,
+    browserState: com.agentsanywhere.app.ui.screens.documents.WorkspaceBrowserState,
 ) {
-    val colors = LocalAAColors.current
-    val scope = rememberCoroutineScope()
-    var directory by remember(session?.id) { mutableStateOf(FilesDirectory(path = ".")) }
-    var loading by remember(session?.id) { mutableStateOf(false) }
-    var error by remember(session?.id) { mutableStateOf<String?>(null) }
-    var openActionPath by remember(session?.id) { mutableStateOf<String?>(null) }
-    var selectedFile by remember(session?.id) { mutableStateOf<FileEntry?>(null) }
-    var preview by remember(session?.id) { mutableStateOf<TextFile?>(null) }
-    var previewLoading by remember(session?.id) { mutableStateOf(false) }
-    var previewError by remember(session?.id) { mutableStateOf<String?>(null) }
-    var searchOpen by remember(session?.id) { mutableStateOf(false) }
-    var searchQuery by remember(session?.id) { mutableStateOf("") }
-    var searchResult by remember(session?.id) { mutableStateOf(SoraFileSearchResult()) }
-    var pushView by remember(session?.id) { mutableStateOf(PushView.Files) }
-    val searchController = remember(selectedFile?.path) { SoraFileSearchController() }
-    val noWorkspaceMessage = stringResource(R.string.files_session_no_workspace)
-    val loadFilesFailedMessage = stringResource(R.string.files_load_failed)
-    val openFileFailedMessage = stringResource(R.string.files_open_failed)
-    val deviceOs = device?.deviceOs ?: session?.cwd?.takeIf { windowsDriveRoot(it) != null }?.let { "windows" }
-
-    DisposableEffect(Unit) {
-        onDispose { onTerminalVerticalDragChange(false) }
-    }
-
-    fun load(path: String) {
-        val current = session
-        val root = current?.cwd?.takeIf { it.isNotBlank() }
-        if (current == null || root == null) {
-            error = noWorkspaceMessage
-            return
+    var view by remember(session?.id) { mutableStateOf(PushView.Files) }
+    LaunchedEffect(openFilePath) { if (!openFilePath.isNullOrBlank()) view = PushView.Files }
+    DisposableEffect(Unit) { onDispose { onTerminalVerticalDragChange(false) } }
+    Column(Modifier.fillMaxSize().background(LocalAAColors.current.canvas)) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            if (maxWidth < 280.dp) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    androidx.compose.material3.IconButton(onClick = onBack) {
+                        Icon(Lucide.ChevronLeft, stringResource(R.string.workspace_conversations), tint = LocalAAColors.current.ink)
+                    }
+                    androidx.compose.material3.IconButton(onClick = { view = PushView.Files }) {
+                        Icon(Lucide.Folder, stringResource(R.string.workspace_files), tint = LocalAAColors.current.ink)
+                    }
+                    androidx.compose.material3.IconButton(onClick = { view = PushView.Terminal }) {
+                        Icon(Lucide.Terminal, stringResource(R.string.common_terminal), tint = LocalAAColors.current.ink)
+                    }
+                }
+            } else SessionAgentFilesHeader(darkMode, view, { view = it }, onBack)
         }
-        val request = remoteFileRequest(
-            targetPath = path,
-            deviceOs = deviceOs,
-            fallbackRoot = root,
-        )
-        loading = true
-        error = null
-        scope.launch {
-            filesController.listFiles(
-                connectorId = current.connectorId,
-                root = request.root,
-                path = request.path,
-            )
-                .onSuccess { directory = it.canonicalRemotePaths(request, deviceOs) }
-                .onFailure { failure -> error = failure.message ?: loadFilesFailedMessage }
-            loading = false
-        }
-    }
-
-    LaunchedEffect(session?.id, session?.cwd, deviceOs) {
-        selectedFile = null
-        preview = null
-        previewError = null
-        searchOpen = false
-        searchQuery = ""
-        searchResult = SoraFileSearchResult()
-        directory = FilesDirectory(path = ".")
-        if (session?.cwd.isNullOrBlank()) {
-            error = noWorkspaceMessage
-        } else {
-            load(".")
-        }
-    }
-
-    LaunchedEffect(session?.id, session?.cwd, deviceOs, openFilePath) {
-        val path = normalizeRemotePath(openFilePath.orEmpty()).trim()
-        if (path.isBlank()) return@LaunchedEffect
-        selectedFile = FileEntry(
-            name = fileNameFromRemotePath(path),
-            path = path,
-            isDirectory = false,
-            size = null,
-        )
-        preview = null
-        previewError = null
-        searchOpen = false
-        searchQuery = ""
-        searchResult = SoraFileSearchResult()
-        pushView = PushView.Files
-        onOpenFileRequestConsumed(openFilePath.orEmpty())
-    }
-
-    LaunchedEffect(session?.id, session?.cwd, deviceOs, selectedFile?.path) {
-        val file = selectedFile
-        if (file == null) return@LaunchedEffect
-        val current = session
-        val root = current?.cwd?.takeIf { it.isNotBlank() }
-        if (current == null || root == null) {
-            preview = null
-            previewLoading = false
-            previewError = noWorkspaceMessage
-            return@LaunchedEffect
-        }
-        preview = null
-        previewLoading = true
-        previewError = null
-        searchQuery = ""
-        searchResult = SoraFileSearchResult()
-        val filePath = normalizeRemotePath(file.path)
-        filesController.readTextFile(
-            connectorId = current.connectorId,
-            root = remoteRootForPath(
-                targetPath = filePath,
-                deviceOs = deviceOs,
-                fallbackRoot = root,
-            ),
-            path = filePath,
-        )
-            .onSuccess { preview = it }
-            .onFailure { failure -> previewError = failure.message ?: openFileFailedMessage }
-        previewLoading = false
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.canvas),
-    ) {
-        SessionAgentFilesHeader(
-            darkMode = darkMode,
-            view = pushView,
-            onSelectView = { pushView = it },
-            onBack = onBack,
-        )
-        if (pushView == PushView.Terminal) {
+        if (view == PushView.Terminal) {
             TerminalContent(
-                terminalController = terminalController,
-                darkMode = darkMode,
-                terminalKey = session?.id,
+                terminalController = terminalController, darkMode = darkMode, terminalKey = session?.id,
                 canReconnect = session != null,
-                onStart = {
-                    val current = session ?: return@TerminalContent
-                    terminalController.ensureStarted(current)
-                },
-                onReconnect = {
-                    val current = session ?: return@TerminalContent
-                    terminalController.reconnect(current)
-                },
-                onClear = {
-                    val current = session ?: return@TerminalContent
-                    terminalController.restart(current)
-                },
-                onVerticalDragChange = onTerminalVerticalDragChange,
-                modifier = Modifier.weight(1f),
+                onStart = { session?.let { terminalController.ensureStarted(it) } },
+                onReconnect = { session?.let { terminalController.reconnect(it) } },
+                onClear = { session?.let { terminalController.restart(it) } },
+                onVerticalDragChange = onTerminalVerticalDragChange, modifier = Modifier.weight(1f),
             )
+        } else if (session?.cwd.isNullOrBlank()) {
+            com.agentsanywhere.app.ui.screens.documents.ReaderStatus(stringResource(R.string.files_session_no_workspace))
         } else {
-            val file = selectedFile
-            if (file == null) {
-                FileListContent(
-                    rootPath = session?.cwd,
-                    deviceOs = deviceOs,
-                    directory = directory,
-                    loading = loading,
-                    error = error,
-                    openActionPath = openActionPath,
-                    darkMode = darkMode,
-                    onOpenActionPath = { openActionPath = it },
-                    onDismissMenu = { openActionPath = null },
-                    onOpenDirectory = { load(it) },
-                    onOpenFile = {
-                        openActionPath = null
-                        selectedFile = it
-                        searchOpen = false
-                    },
-                )
-            } else {
-                FilePreviewContent(
-                    rootPath = session?.cwd,
-                    deviceOs = deviceOs,
-                    file = file,
-                    preview = preview,
-                    loading = previewLoading,
-                    error = previewError,
-                    darkMode = darkMode,
-                    searchOpen = searchOpen,
-                    searchQuery = searchQuery,
-                    searchResult = searchResult,
-                    searchController = searchController,
-                    onBackToFiles = {
-                        selectedFile = null
-                        preview = null
-                        previewError = null
-                        searchOpen = false
-                        searchQuery = ""
-                        searchResult = SoraFileSearchResult()
-                    },
-                    onToggleSearch = { searchOpen = !searchOpen },
-                    onSearchQueryChange = { searchQuery = it },
-                    onSearchResult = { searchResult = it },
-                )
-            }
+            com.agentsanywhere.app.ui.screens.documents.WorkspaceBrowser(
+                connectorId = session!!.connectorId, root = session.cwd!!, deviceOs = device?.deviceOs,
+                controller = filesController, modifier = Modifier.weight(1f), openFilePath = openFilePath,
+                onOpenFileRequestConsumed = onOpenFileRequestConsumed,
+                navigation = browserState,
+            )
         }
     }
 }

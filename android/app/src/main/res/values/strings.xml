@@ -735,4 +735,27 @@
     <string name="update_install_cancelled">Installation was cancelled. Your current app and data are unchanged. You can retry the update in Settings.</string>
     <string name="update_install_invalid">Android could not read the update package. Download the latest update again.</string>
     <string name="update_install_failed">Android could not complete installation. Check available storage and installation permissions, then retry from Settings. If it still fails, report the system message and phone model.</string>
+    <string name="document_read">Read</string>
+    <string name="document_source">Source</string>
+    <string name="document_previous">Previous</string>
+    <string name="document_next">Next</string>
+    <string name="document_unsupported">This file cannot be displayed as text. Text files up to 8 MB are supported.</string>
+    <string name="document_pdf_failed">Could not open this PDF. It may be damaged or password-protected.</string>
+    <string name="document_load_failed">Could not load the file. Check that the device is online and the file still exists, then refresh.</string>
+    <string name="document_filter_all">All</string>
+    <string name="document_filter_markdown">Markdown</string>
+    <string name="document_filter_pdf">PDF</string>
+    <string name="document_filter_images">Images</string>
+    <string name="document_filter_other">Other</string>
+    <string name="document_parent">Parent folder</string>
+    <string name="document_reload">Refresh</string>
+    <string name="document_search">Search this folder</string>
+    <string name="document_no_matches">No matching files in this folder.</string>
+    <string name="document_choose_device">Choose device</string>
+    <string name="document_device_files">Device files</string>
+    <string name="workspace_conversations">Chat</string>
+    <string name="workspace_files">Files</string>
+    <string name="workspace_split">Split view</string>
+    <string name="workspace_fullscreen">Full screen</string>
+    <string name="workspace_resize">Drag to resize chat and files</string>
 </resources>

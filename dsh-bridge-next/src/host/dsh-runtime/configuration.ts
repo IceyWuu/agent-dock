@@ -4,7 +4,7 @@ import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import type {} from '@deepseek-ai/dsh-commands'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import { SessionLogOffset, type SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionLogOffset, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionLogSnapshot } from '@deepseek-ai/dsh-session-query'
 import { BridgeError } from './errors.js'
 import { decodeModelSelection, decodePermissionSelection, modelSelectionId, permissionSelectionId, type Selections, type ModelSelection } from './selections.js'
@@ -89,7 +89,7 @@ export class RuntimeConfiguration {
     const log = snapshot ?? (live ? undefined : await this.ctx.sessionQuery.readSession(id))
     const projections = this.ctx.get('sessionProjections')
     const projected = projections && (live ? projections.snapshot(live, ['modelSelection', 'permissions', 'agentPreset'])
-      : projections.restore({}, log!.events, SessionLogOffset(0), log!.session, log!.inheritedEventCount).snapshot)
+      : projections.restore({}, log!.events, 0 as SessionLogOffset, log!.session, log!.inheritedEventCount).snapshot)
     const events = live?.snapshotEvents() ?? log!.events
     const header = live?.header ?? log!.session
     const rawModel = projected?.values.modelSelection?.next

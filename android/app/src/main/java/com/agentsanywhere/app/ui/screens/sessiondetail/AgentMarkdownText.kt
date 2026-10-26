@@ -34,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
@@ -1002,4 +1003,50 @@ private fun isFilePath(href: String): Boolean {
         !href.startsWith("mailto:") &&
         !href.startsWith("#") &&
         !href.startsWith("//")
+}
+
+
+/** Document mode renders blocks lazily, so long generated Markdown does not compose all at once. */
+@Composable
+internal fun AgentMarkdownDocument(
+    text: String,
+    darkMode: Boolean,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    onOpenFile: (String) -> Unit,
+    loadImage: suspend (String) -> java.io.File?,
+    modifier: Modifier = Modifier,
+) {
+    val nodes by androidx.compose.runtime.produceState<List<Node>>(emptyList(), text) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            (markdownParser.parse(normalizeMarkdownTables(text)) as Document).children()
+        }
+    }
+    val styles = markdownStyles(darkMode, false)
+    val uriHandler = LocalUriHandler.current
+    androidx.compose.foundation.lazy.LazyColumn(
+        state = listState, modifier = modifier.fillMaxWidth().testTag("document-markdown"),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items(nodes.size) { index ->
+            val node = nodes[index]
+            val images = if (node is Paragraph) node.children().filterIsInstance<Image>() else emptyList()
+            if (images.isNotEmpty() && node.children().all { it is Image || (it is Text && it.literal.isBlank()) }) {
+                images.forEach { image ->
+                    val file by androidx.compose.runtime.produceState<java.io.File?>(null, image.destination) {
+                        value = loadImage(image.destination)
+                    }
+                    if (file != null) coil3.compose.AsyncImage(
+                        model = file, contentDescription = image.children().filterIsInstance<Text>().joinToString("") { it.literal },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp, max = 500.dp),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                    ) else Text(image.children().filterIsInstance<Text>().joinToString("") { it.literal }, color = LocalAAColors.current.muted)
+                }
+            } else {
+                androidx.compose.foundation.text.selection.SelectionContainer {
+                    MarkdownBlocks(listOf(node), darkMode, styles, onOpenFile, { runCatching { uriHandler.openUri(it) } })
+                }
+            }
+        }
+    }
 }

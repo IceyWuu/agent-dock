@@ -751,7 +751,7 @@ private fun TimelineMessage.isToolRunItem(): Boolean {
         kind == TimelineMessageKind.FileChange ||
         kind == TimelineMessageKind.AgentCall ||
         kind == TimelineMessageKind.ToolCall ||
-        (kind == TimelineMessageKind.Artifact && contentKind != "diff")
+        (kind == TimelineMessageKind.Artifact && contentKind !in setOf("diff", "file"))
 }
 
 private fun TimelineMessage.isReconnectError(): Boolean =
@@ -1188,7 +1188,9 @@ private fun TimelineMessageRow(
         TimelineMessageKind.Command,
         TimelineMessageKind.FileChange,
         TimelineMessageKind.ToolCall,
-        TimelineMessageKind.Artifact -> ToolActivityCard(
+        TimelineMessageKind.Artifact -> if (message.kind == TimelineMessageKind.Artifact && message.contentKind == "file") {
+            com.agentsanywhere.app.ui.screens.documents.WorkspaceFileCard(message.detail, message.body, onOpenFile)
+        } else ToolActivityCard(
             message = message,
             darkMode = darkMode,
             listState = listState,

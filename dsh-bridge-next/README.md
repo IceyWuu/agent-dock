@@ -39,6 +39,8 @@ dsh plugin --profile desktop add @agents-anywhere/dsh-bridge-next
 
 ![Agents Anywhere 设备页面显示设备在线，DSH Agent Runtime 正在运行](docs/images/dsh-runtime-connected.webp)
 
+DSH 通过 `present` 展示的文件现可同步为聊天文件卡片；Android 2.1.6 点击后直接阅读 Markdown、PDF 和图片。工作设备需安装桥接 2.1.1 及配套 Connector，并重启 DSH。文件按打开操作传输，尚不包含全部原生图片块和自定义 UI。
+
 ## 使用条件与数据范围
 
 - 远程连接需要 Agents Anywhere 账号和可访问的服务端。自托管时输入后端地址；手机扫码时，手机也需要能够访问该服务。

@@ -292,3 +292,20 @@ test('rc.1 failed attempts discard provisional blocks before the next attempt', 
   projection.stream(1, 1, { type: 'text-delta', index: 0, text: 'retry' }, 1003, 2)
   assert.ok(projection.drain().items.some(item => item.content.text === 'retry'))
 })
+
+
+test('declared final files retain paths and descriptions in live and historical projections', () => {
+  const snapshot = log([...start, {
+    type: 'deliverables/presented', data: { turn: 1, callId: 'present-1', files: [
+      { path: '/work/a report.md', description: 'Rendered study notes' },
+      { path: '/work/result.pdf' }, { path: '' }, { path: null }, { path: '/work/bad\u0000.pdf' },
+    ] },
+  }])
+  const live = createProjection('native', 'platform')
+  snapshot.events.forEach(event => live.apply(event))
+  const artifacts = live.snapshot().filter(item => item.type === 'artifact')
+  assert.equal(artifacts.length, 2)
+  assert.deepEqual(artifacts[0]!.content, {kind: 'file', path: '/work/a report.md', description: 'Rendered study notes'})
+  assert.deepEqual(artifacts[1]!.content, {kind: 'file', path: '/work/result.pdf'})
+  assert.deepEqual(live.snapshot(), projectHistory(snapshot, 'platform'))
+})

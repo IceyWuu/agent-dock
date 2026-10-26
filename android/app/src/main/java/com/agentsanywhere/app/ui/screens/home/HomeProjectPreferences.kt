@@ -31,6 +31,13 @@ internal class HomeProjectPreferences(private val storage: SharedPreferences, pr
     var selectedAgentRuntime by mutableStateOf(storage.getString("$key:agent", null)?.takeIf(String::isNotBlank))
         private set
 
+    var fileProjectId by mutableStateOf(storage.getString("$key:files-project", null))
+        private set
+    fun selectFileProject(id: String?) {
+        fileProjectId = id
+        storage.edit().putString("$key:files-project", id).apply()
+    }
+
     fun selectSessionStatus(status: ProjectSessionStatusFilter) {
         sessionStatus = status
         storage.edit().putString("$key:status", status.name).apply()

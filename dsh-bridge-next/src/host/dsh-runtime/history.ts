@@ -8,7 +8,7 @@ import { enrichToolResult, parentToolItem, resultContent, toolContent } from './
 import { json, record, type Data, type ItemStatus, type ItemType, type TimelineItem } from './types.js'
 
 // Bump when replay semantics change so old checkpoints rebuild their timeline.
-export const PROJECTION_VERSION = 3
+export const PROJECTION_VERSION = 4
 
 // Older persisted logs and fixtures can still carry the pre-rc.1 chunk vocabulary.
 type LegacyChunk = { type: 'assistant/chunk', seq: SessionEvent['seq'], time: number,
@@ -130,7 +130,16 @@ export function createProjection(externalId: string, platformId: string, fingerp
     const data = record(event.data)
     const eventType: string = event.type
     const stepKey = `${String(data.turn)}:${String(data.step)}`
-    if (event.type === 'turn/start') {
+    if (eventType === 'deliverables/presented') {
+      if (Array.isArray(data.files)) data.files.forEach((value, index) => {
+        const file = record(value)
+        if (typeof file.path !== 'string' || !file.path.trim() || /[\u0000-\u001f]/.test(file.path)) return
+        put('delivery', `${event.seq}:${index}`, event, 'artifact', 'done', 'assistant', {
+          kind: 'file', path: file.path,
+          ...(typeof file.description === 'string' ? { description: file.description } : {}),
+        }, index)
+      })
+    } else if (event.type === 'turn/start') {
       turnStart = Number(event.seq)
       turnId = itemId(externalId, 'turn', String(turnStart))
       put('turn.start', String(turnStart), event, 'turn.start', 'done', 'system', { kind: 'turn_start', turn: event.data.turn })

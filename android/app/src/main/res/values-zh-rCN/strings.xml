@@ -733,4 +733,27 @@
     <string name="update_install_cancelled">安装已取消，当前 App 和数据已保留，可在设置中重新更新。</string>
     <string name="update_install_invalid">Android 无法读取此更新包，请重新下载最新版本。</string>
     <string name="update_install_failed">Android 未能完成安装。请检查存储空间和安装权限后，在设置中重试；若仍失败，请反馈系统提示和手机型号。</string>
+    <string name="document_read">阅读</string>
+    <string name="document_source">源码</string>
+    <string name="document_previous">上一页</string>
+    <string name="document_next">下一页</string>
+    <string name="document_unsupported">此文件无法作为文本显示，文本阅读支持最大 8 MB 的文件。</string>
+    <string name="document_pdf_failed">无法打开此 PDF，文件可能已损坏或有密码保护。</string>
+    <string name="document_load_failed">未能读取文件。请确认设备在线、文件仍存在后刷新重试。</string>
+    <string name="document_filter_all">全部</string>
+    <string name="document_filter_markdown">Markdown</string>
+    <string name="document_filter_pdf">PDF</string>
+    <string name="document_filter_images">图片</string>
+    <string name="document_filter_other">其他</string>
+    <string name="document_parent">上一级</string>
+    <string name="document_reload">刷新</string>
+    <string name="document_search">搜索当前目录</string>
+    <string name="document_no_matches">此目录没有符合条件的文件。</string>
+    <string name="document_choose_device">选择设备</string>
+    <string name="document_device_files">设备文件</string>
+    <string name="workspace_conversations">对话</string>
+    <string name="workspace_files">文件</string>
+    <string name="workspace_split">分屏</string>
+    <string name="workspace_fullscreen">全屏</string>
+    <string name="workspace_resize">拖动调整对话和文件比例</string>
 </resources>

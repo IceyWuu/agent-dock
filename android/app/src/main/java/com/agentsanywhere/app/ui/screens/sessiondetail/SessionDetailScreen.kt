@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -195,7 +197,7 @@ fun SessionDetailScreen(
     val keyboard = LocalSoftwareKeyboardController.current
     val haptic = LocalHapticFeedback.current
     val snackbarHostState = remember { SnackbarHostState() }
-    val pagerState = rememberPagerState(pageCount = { 2 })
+    var workspacePane by androidx.compose.runtime.saveable.rememberSaveable(sessionId) { mutableStateOf(0) }
     val composerDraftSessionId = sessionId ?: preparedSession?.localSessionId
     val restoredComposerDraft = remember(composerDraftSessionId) {
         composerDraftStore.restore(
@@ -398,8 +400,10 @@ fun SessionDetailScreen(
         val trimmed = path.trim()
         if (trimmed.isBlank()) return
         pendingOpenFilePath = trimmed
-        scope.launch { pagerState.animateScrollToPage(1) }
+        workspacePane = 1
     }
+
+    var openedDocument by remember(sessionId) { mutableStateOf<com.agentsanywhere.app.feature.files.WorkspaceDocument?>(null) }
 
     fun openAttachment(attachment: com.agentsanywhere.app.feature.sessiondetail.TimelineAttachment) {
         val id = sessionId ?: return
@@ -408,6 +412,13 @@ fun SessionDetailScreen(
                 .onSuccess { downloaded ->
                     val target = withContext(Dispatchers.IO) {
                         cacheDownloadedAttachment(context.cacheDir, downloaded)
+                    }
+                    if (com.agentsanywhere.app.feature.files.workspaceFileKind(downloaded.name) != com.agentsanywhere.app.feature.files.WorkspaceFileKind.Other ||
+                        downloaded.mediaType.startsWith("text/")) {
+                        openedDocument = com.agentsanywhere.app.feature.files.WorkspaceDocument(
+                            "attachment:$id:${attachment.fileId}", downloaded.name, target,
+                        )
+                        return@onSuccess
                     }
                     val uri = FileProvider.getUriForFile(
                         context,
@@ -1145,8 +1156,8 @@ fun SessionDetailScreen(
     }
 
     BackHandler {
-        if (pagerState.currentPage == 1) {
-            scope.launch { pagerState.animateScrollToPage(0) }
+        if (workspacePane == 1) {
+            run { workspacePane = 0 }
         } else {
             navigate(AppDestination.Sessions)
         }
@@ -1661,14 +1672,16 @@ fun SessionDetailScreen(
     }
     val hasOpenNotifications = state.notices.notices.any(RuntimeNotice::openNotification)
 
+    val workspaceBrowserState = com.agentsanywhere.app.ui.screens.documents.rememberWorkspaceBrowserState(
+        state.session?.connectorId.orEmpty(), state.session?.cwd.orEmpty(),
+    )
     ScreenScaffold {
-        HorizontalPager(
-            state = pagerState,
+        com.agentsanywhere.app.ui.screens.documents.ConversationWorkspace(
+            selectedPane = workspacePane,
+            onPaneSelected = { workspacePane = it },
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            beyondViewportPageCount = 1,
-            userScrollEnabled = !terminalVerticalDragActive,
         ) {
             page ->
             if (page == 0) {
@@ -1804,7 +1817,7 @@ fun SessionDetailScreen(
                             title = state.session?.title ?: stringResource(R.string.session_title_fallback),
                             darkMode = darkMode,
                             onLeftClick = ::openRuntimeSettings,
-                            onRightClick = { scope.launch { pagerState.animateScrollToPage(1) } },
+                            onRightClick = { run { workspacePane = 1 } },
                             modifier = Modifier.align(Alignment.TopCenter),
                         )
                         if (previewImage == null) {
@@ -1832,6 +1845,7 @@ fun SessionDetailScreen(
                     session = state.session,
                     device = devices.firstOrNull { device -> device.id == state.session?.connectorId },
                     filesController = filesController,
+                    browserState = workspaceBrowserState,
                     terminalController = remoteTerminal,
                     darkMode = darkMode,
                     openFilePath = pendingOpenFilePath,
@@ -1839,8 +1853,22 @@ fun SessionDetailScreen(
                         if (pendingOpenFilePath == consumed) pendingOpenFilePath = null
                     },
                     onTerminalVerticalDragChange = { terminalVerticalDragActive = it },
-                    onBack = { scope.launch { pagerState.animateScrollToPage(0) } },
+                    onBack = { run { workspacePane = 0 } },
                 )
+            }
+        }
+    }
+
+    openedDocument?.let { document ->
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { openedDocument = null },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+        ) {
+            Column(Modifier.fillMaxSize().background(colors.canvas).windowInsetsPadding(WindowInsets.systemBars)) {
+                androidx.compose.material3.TextButton(onClick = { openedDocument = null }) {
+                    androidx.compose.material3.Text("‹ " + document.name)
+                }
+                com.agentsanywhere.app.ui.screens.documents.DocumentReader(document, Modifier.weight(1f))
             }
         }
     }
